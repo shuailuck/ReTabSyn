@@ -10,18 +10,21 @@ run_pipeline.py: ReTabSyn 全流程实验脚本
       --scenario small \
       --target class \
       --scenario-kwargs '{"target_col": "class", "n_samples": 64}' \
-      --n-seeds 10
+      --n-seeds 10 \
+      --output results/small_n64.csv
 """
 
 from __future__ import annotations
 import argparse
 import json
+import os
 import numpy as np
 import pandas as pd
 from collections import defaultdict
 
 from scenario import ScenarioFactory
 from synthesis.smote_synthesizer import SmoteSynthesizer
+from synthesis.great_synthesizer import GreatSynthesizer
 from evaluator.utility import evaluate_all_modes
 
 
@@ -42,42 +45,27 @@ def run_single_seed(
     metric: str = "auroc",
 ) -> dict[str, dict[str, float]]:
     """
-    单个 seed 的完整流程。
-
-    Parameters
-    ----------
-    seed : 控制本轮的场景划分与合成随机性。
-    csv_path : 原始 CSV 数据路径。
-    scenario_name : "small" | "imbalanced" | "shift"
-    scenario_kwargs : 场景构造参数（不含 seed，由本函数注入）。
-    synthesizer_name : 合成算法名称，当前支持 "smote"。
-    synthesizer_kwargs : 合成器构造参数（不含 random_state）。
-    target_col : 目标列名，用于下游评估。
-    n_synth_samples : 合成样本数，默认与 real_train 等量。
-    metric : "auroc" | "prauc"
-
-    Returns
-    -------
-    {"real": {clf: score}, "synthetic": {clf: score}, "augment": {clf: score}}
+    单个 seed 的完整流程，返回 {mode: {classifier: score}}。
     """
-    # 1. 加载原始数据
     df = pd.read_csv(csv_path)
 
-    # 2. 构建场景
     scenario = ScenarioFactory.create(scenario_name, seed=seed, **scenario_kwargs)
     real_train, real_test = scenario.build(df)
 
-    # 3. 数据合成
     synth_df = None
     if synthesizer_name == "smote":
         synth = SmoteSynthesizer(random_state=seed, **synthesizer_kwargs)
         synth.fit(real_train)
         n_samples = n_synth_samples if n_synth_samples is not None else len(real_train)
         synth_df = synth.sample(n_samples=n_samples)
+    elif synthesizer_name == "great":
+        synth = GreatSynthesizer(random_state=seed, **synthesizer_kwargs)
+        synth.fit(real_train)
+        n_samples = n_synth_samples if n_synth_samples is not None else len(real_train)
+        synth_df = synth.sample(n_samples=n_samples)
     else:
         raise ValueError(f"未知合成算法: {synthesizer_name}")
 
-    # 4. 下游评估
     return evaluate_all_modes(
         real_train=real_train,
         real_test=real_test,
@@ -89,19 +77,42 @@ def run_single_seed(
 
 
 # ---------------------------------------------------------------------------
-# 多 Seed 聚合
+# 原始结果展平
+# ---------------------------------------------------------------------------
+
+def _flatten_raw_results(
+    all_results: list[dict[str, dict[str, float]]],
+    base_seed: int,
+    scenario_name: str,
+    scenario_kwargs: dict,
+    metric: str,
+) -> pd.DataFrame:
+    """将多 seed 的嵌套结果展平为长格式 DataFrame。"""
+    rows = []
+    for i, res in enumerate(all_results):
+        seed = base_seed + i
+        for mode, clf_scores in res.items():
+            for clf, score in clf_scores.items():
+                rows.append({
+                    "seed": seed,
+                    "scenario": scenario_name,
+                    **{f"param_{k}": v for k, v in scenario_kwargs.items()},
+                    "mode": mode,
+                    "classifier": clf,
+                    "metric": metric,
+                    "score": score,
+                })
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# 聚合
 # ---------------------------------------------------------------------------
 
 def aggregate_results(
     all_results: list[dict[str, dict[str, float]]],
 ) -> dict[str, dict[str, tuple[float, float]]]:
-    """
-    聚合多个 seed 的结果，计算每个 (mode, classifier) 的均值与标准误。
-
-    Returns
-    -------
-    {mode: {classifier: (mean, standard_error)}}
-    """
+    """聚合多个 seed 的结果，返回 {mode: {classifier: (mean, se)}}。"""
     accum: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for res in all_results:
         for mode, clf_scores in res.items():
@@ -134,13 +145,16 @@ def run_pipeline(
     n_seeds: int = 10,
     base_seed: int = 42,
     metric: str = "auroc",
-) -> dict[str, dict[str, tuple[float, float]]]:
+    output_csv: str | None = None,
+) -> tuple[dict[str, dict[str, tuple[float, float]]], pd.DataFrame]:
     """
     完整 multi-seed 实验入口。
 
     Returns
     -------
-    {mode: {classifier: (mean, standard_error)}}
+    (aggregated, raw_df)
+        aggregated : {mode: {classifier: (mean, se)}}
+        raw_df : 每行一个 (seed, mode, classifier) 的长格式 DataFrame
     """
     if synthesizer_kwargs is None:
         synthesizer_kwargs = {}
@@ -161,7 +175,15 @@ def run_pipeline(
         )
         all_results.append(res)
 
-    return aggregate_results(all_results)
+    aggregated = aggregate_results(all_results)
+    raw_df = _flatten_raw_results(all_results, base_seed, scenario_name, scenario_kwargs, metric)
+
+    if output_csv is not None:
+        os.makedirs(os.path.dirname(output_csv) or ".", exist_ok=True)
+        raw_df.to_csv(output_csv, index=False)
+        print(f"\nRaw results saved to: {output_csv}")
+
+    return aggregated, raw_df
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +202,8 @@ def _parse_args() -> argparse.Namespace:
                         " small: {\"target_col\":..., \"n_samples\":64, \"balance_mode\":\"raw\"}"
                         " imbalanced: {\"target_col\":..., \"minority_prev\":0.01}"
                         " shift: {\"split_col\":...}")
-    p.add_argument("--synthesizer", default="smote", help="合成算法 (默认 smote)")
+    p.add_argument("--synthesizer", default="smote", choices=["smote", "great"],
+                   help="合成算法 (默认 smote)")
     p.add_argument("--synth-kwargs", type=str, default="{}",
                    help="合成器参数，JSON 字典字符串，如 '{\"k_neighbors\": 5}'")
     p.add_argument("--n-synth", type=int, default=None, help="合成样本数（默认与训练集等量）")
@@ -188,12 +211,12 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--base-seed", type=int, default=42, help="起始随机种子 (默认 42)")
     p.add_argument("--metric", default="auroc", choices=["auroc", "prauc"],
                    help="评估指标 (默认 auroc)")
+    p.add_argument("--output", default=None, help="原始结果 CSV 输出路径")
 
     return p.parse_args()
 
 
 def _print_results(result: dict[str, dict[str, tuple[float, float]]]) -> None:
-    """格式化打印结果表格。"""
     modes = ["real", "synthetic", "augment"]
     for mode in modes:
         if mode not in result:
@@ -209,7 +232,7 @@ def _print_results(result: dict[str, dict[str, tuple[float, float]]]) -> None:
 if __name__ == "__main__":
     args = _parse_args()
 
-    result = run_pipeline(
+    aggregated, raw_df = run_pipeline(
         csv_path=args.csv,
         scenario_name=args.scenario,
         scenario_kwargs=json.loads(args.scenario_kwargs),
@@ -220,6 +243,7 @@ if __name__ == "__main__":
         n_seeds=args.n_seeds,
         base_seed=args.base_seed,
         metric=args.metric,
+        output_csv=args.output,
     )
 
-    _print_results(result)
+    _print_results(aggregated)

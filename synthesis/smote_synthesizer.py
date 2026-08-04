@@ -9,8 +9,8 @@ from synthesis.synthesizer import BaseTabularSynthesizer
 class SmoteSynthesizer(BaseTabularSynthesizer):
     """基于类别 Bucket 内 KNN 线性插值的 SMOTE 合成器"""
 
-    def __init__(self, integer_columns: list = None, random_state: int = 42, k_neighbors: int = 5, test_size: float = 0.2):
-        super().__init__(integer_columns=integer_columns, random_state=random_state, test_size=test_size)
+    def __init__(self, integer_columns: list = None, random_state: int = 42, k_neighbors: int = 5):
+        super().__init__(integer_columns=integer_columns, random_state=random_state)
         self.k_neighbors = k_neighbors
         self.buckets = []
         self.bucket_probs = None
@@ -18,7 +18,7 @@ class SmoteSynthesizer(BaseTabularSynthesizer):
     def _fit(self, df: pd.DataFrame):
         cat_cols = self.transformer.categorical_cols
 
-        # 根据类别特征分桶（忽略 SOURCE_LABEL）
+        # 根据类别特征分桶
         if cat_cols:
             self.buckets = [group.reset_index(drop=True) for _, group in df.groupby(cat_cols)]
             sizes = np.array([len(b) for b in self.buckets], dtype=float)
