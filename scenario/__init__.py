@@ -2,10 +2,10 @@
 scenarios/__init__.py: 导出所有 Scenario 类与 Factory 统一调用入口
 """
 
-from scenario import BaseScenario
-from small_data import SmallDataScenario
-from imbalanced import ImbalancedDataScenario
-from distribution_shift import DistributionShiftScenario
+from scenario.scenario import BaseScenario
+from scenario.small_data import SmallDataScenario
+from scenario.imbalanced import ImbalancedDataScenario
+from scenario.distribution_shift import DistributionShiftScenario
 
 
 class ScenarioFactory:

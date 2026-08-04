@@ -4,8 +4,8 @@ scenarios/small_data.py: Small Data 场景构建
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from scenario import BaseScenario
-from imbalanced import ImbalancedDataScenario
+from scenario.scenario import BaseScenario
+from scenario.imbalanced import ImbalancedDataScenario
 
 
 class SmallDataScenario(BaseScenario):

@@ -3,7 +3,7 @@ scenarios/distribution_shift.py: Distribution Shift 场景构建
 """
 
 import pandas as pd
-from scenario import BaseScenario
+from scenario.scenario import BaseScenario
 
 
 class DistributionShiftScenario(BaseScenario):

@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import NearestNeighbors
-from synthesizer import BaseTabularSynthesizer
+from synthesis.synthesizer import BaseTabularSynthesizer
 # ===========================================================================
 # SMOTE 算法的具体实现
 # ===========================================================================

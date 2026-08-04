@@ -5,7 +5,7 @@ scenarios/imbalanced.py: Imbalanced Data 场景构建
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from scenario import BaseScenario
+from scenario.scenario import BaseScenario
 
 
 class ImbalancedDataScenario(BaseScenario):
