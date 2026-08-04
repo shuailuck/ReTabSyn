@@ -1,0 +1,7 @@
+{
+    "synthesizer": "tvae",
+    "synth_kwargs": {
+        "epochs": 300,
+        "batch_size": 500
+    }
+}

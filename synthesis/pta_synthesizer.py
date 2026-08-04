@@ -19,8 +19,12 @@ from transformers import (
     AutoModelForSequenceClassification,
     Trainer,
     TrainingArguments,
-    AdamW,
 )
+
+try:
+    from transformers import AdamW
+except ImportError:
+    from torch.optim import AdamW
 from datasets import Dataset as HFDataset, DatasetDict
 from sklearn.model_selection import train_test_split
 

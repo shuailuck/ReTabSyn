@@ -101,13 +101,13 @@ def generate_smote_synthetic(
 
     return pd.DataFrame(synthetic_rows)
 
-# Example usage (uncomment to run):
-df = pd.DataFrame({
-    'Age': [25, 40, 60],
-    'Charge': [3000.0, 7000.5, 15000.0],
-    'Gender': ['M', 'F', 'M'],
-    'Smoker': ['Yes', 'No', 'Yes']
-})
-integer_columns = ['Age']
-synth = generate_smote_synthetic(df, n_samples=5, integer_columns=integer_columns, random_state=42)
-print(synth)
+if __name__ == "__main__":
+    df = pd.DataFrame({
+        'Age': [25, 40, 60],
+        'Charge': [3000.0, 7000.5, 15000.0],
+        'Gender': ['M', 'F', 'M'],
+        'Smoker': ['Yes', 'No', 'Yes']
+    })
+    integer_columns = ['Age']
+    synth = generate_smote_synthetic(df, n_samples=5, integer_columns=integer_columns, random_state=42)
+    print(synth)

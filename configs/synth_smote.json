@@ -1,0 +1,6 @@
+{
+    "synthesizer": "smote",
+    "synth_kwargs": {
+        "k_neighbors": 5
+    }
+}

@@ -32,3 +32,6 @@ build/
 # Misc
 *.log
 *.tmp
+
+retabsyn_checkpoints/
+trainer_great/

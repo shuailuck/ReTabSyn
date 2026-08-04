@@ -1,0 +1,9 @@
+{
+    "synthesizer": "great",
+    "synth_kwargs": {
+        "llm": "distilgpt2",
+        "batch_size": 32,
+        "epochs": 50,
+        "fp16": true
+    }
+}

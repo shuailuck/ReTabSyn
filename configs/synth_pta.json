@@ -1,0 +1,11 @@
+{
+    "synthesizer": "pta",
+    "synth_kwargs": {
+        "llm_model": "gpt2",
+        "great_epochs": 3,
+        "gan_epochs": 3,
+        "classifier_epochs": 3,
+        "batch_size": 8,
+        "num_remove": 2
+    }
+}

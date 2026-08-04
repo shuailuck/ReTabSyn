@@ -1,0 +1,12 @@
+{
+    "synthesizer": "cartgenir",
+    "synth_kwargs": {
+        "density": "denseweight",
+        "alpha": 1.5,
+        "eta": 0.75,
+        "delta": 0.001,
+        "tree_max_depth": 5,
+        "tree_min_samples_leaf": 5,
+        "synthetic_per_parent": 5
+    }
+}

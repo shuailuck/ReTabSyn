@@ -26,6 +26,9 @@ from scenario import ScenarioFactory
 from synthesis.smote_synthesizer import SmoteSynthesizer
 from synthesis.great_synthesizer import GreatSynthesizer
 from synthesis.pta_synthesizer import PTASynthesizer
+from synthesis.tvae_synthesizer import TVAESynthesizer
+from synthesis.retabsyn_synthesizer import ReTabSynSynthesizer
+from synthesis.cartgenir_synthesizer import CARTGenIRSynthesizer
 from evaluator.utility import evaluate_all_modes
 
 
@@ -58,6 +61,9 @@ def run_single_seed(
         "smote": SmoteSynthesizer,
         "great": GreatSynthesizer,
         "pta": PTASynthesizer,
+        "tvae": TVAESynthesizer,
+        "retabsyn": ReTabSynSynthesizer,
+        "cartgenir": CARTGenIRSynthesizer,
     }
     synth_cls = _SYNTHESIZERS.get(synthesizer_name)
     if synth_cls is None:
@@ -200,14 +206,15 @@ def _parse_args() -> argparse.Namespace:
                    help="测试场景")
     p.add_argument("--target", required=True, help="目标列名（用于下游评估）")
     p.add_argument("--scenario-kwargs", type=str, default="{}",
-                   help="场景构造参数，JSON 字典字符串。"
-                        " small: {\"target_col\":..., \"n_samples\":64, \"balance_mode\":\"raw\"}"
+                   help="场景构造参数，JSON 字典。"
+                        " small: {\"target_col\":..., \"n_samples\":64}"
                         " imbalanced: {\"target_col\":..., \"minority_prev\":0.01}"
                         " shift: {\"split_col\":...}")
-    p.add_argument("--synthesizer", default="smote", choices=["smote", "great", "pta"],
-                   help="合成算法 (默认 smote)")
+    p.add_argument("--synthesizer", default="smote",
+                   choices=["smote", "great", "pta", "tvae", "retabsyn", "cartgenir"],
+                   help="合成算法，自动从 configs/synth_<name>.json 加载参数")
     p.add_argument("--synth-kwargs", type=str, default="{}",
-                   help="合成器参数，JSON 字典字符串，如 '{\"k_neighbors\": 5}'")
+                   help="合成器参数覆盖，JSON 字典，如 '{\"k_neighbors\": 5}'（会覆盖配置文件中的同名字段）")
     p.add_argument("--n-synth", type=int, default=None, help="合成样本数（默认与训练集等量）")
     p.add_argument("--n-seeds", type=int, default=10, help="重复实验次数 (默认 10)")
     p.add_argument("--base-seed", type=int, default=42, help="起始随机种子 (默认 42)")
@@ -234,12 +241,24 @@ def _print_results(result: dict[str, dict[str, tuple[float, float]]]) -> None:
 if __name__ == "__main__":
     args = _parse_args()
 
+    # 自动加载 configs/synth_<name>.json
+    config_path = f"configs/synth_{args.synthesizer}.json"
+    synth_kwargs = {}
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        synth_kwargs.update(cfg.get("synth_kwargs", {}))
+        print(f"Loaded config: {config_path}")
+
+    # CLI --synth-kwargs 覆盖配置文件中的值
+    synth_kwargs.update(json.loads(args.synth_kwargs))
+
     aggregated, raw_df = run_pipeline(
         csv_path=args.csv,
         scenario_name=args.scenario,
         scenario_kwargs=json.loads(args.scenario_kwargs),
         synthesizer_name=args.synthesizer,
-        synthesizer_kwargs=json.loads(args.synth_kwargs),
+        synthesizer_kwargs=synth_kwargs,
         target_col=args.target,
         n_synth_samples=args.n_synth,
         n_seeds=args.n_seeds,
