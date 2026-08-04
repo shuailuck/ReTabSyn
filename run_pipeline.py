@@ -25,6 +25,7 @@ from collections import defaultdict
 from scenario import ScenarioFactory
 from synthesis.smote_synthesizer import SmoteSynthesizer
 from synthesis.great_synthesizer import GreatSynthesizer
+from synthesis.pta_synthesizer import PTASynthesizer
 from evaluator.utility import evaluate_all_modes
 
 
@@ -53,18 +54,19 @@ def run_single_seed(
     real_train, real_test = scenario.build(df)
 
     synth_df = None
-    if synthesizer_name == "smote":
-        synth = SmoteSynthesizer(random_state=seed, **synthesizer_kwargs)
-        synth.fit(real_train)
-        n_samples = n_synth_samples if n_synth_samples is not None else len(real_train)
-        synth_df = synth.sample(n_samples=n_samples)
-    elif synthesizer_name == "great":
-        synth = GreatSynthesizer(random_state=seed, **synthesizer_kwargs)
-        synth.fit(real_train)
-        n_samples = n_synth_samples if n_synth_samples is not None else len(real_train)
-        synth_df = synth.sample(n_samples=n_samples)
-    else:
+    _SYNTHESIZERS = {
+        "smote": SmoteSynthesizer,
+        "great": GreatSynthesizer,
+        "pta": PTASynthesizer,
+    }
+    synth_cls = _SYNTHESIZERS.get(synthesizer_name)
+    if synth_cls is None:
         raise ValueError(f"未知合成算法: {synthesizer_name}")
+
+    synth = synth_cls(random_state=seed, **synthesizer_kwargs)
+    synth.fit(real_train)
+    n_samples = n_synth_samples if n_synth_samples is not None else len(real_train)
+    synth_df = synth.sample(n_samples=n_samples)
 
     return evaluate_all_modes(
         real_train=real_train,
@@ -202,7 +204,7 @@ def _parse_args() -> argparse.Namespace:
                         " small: {\"target_col\":..., \"n_samples\":64, \"balance_mode\":\"raw\"}"
                         " imbalanced: {\"target_col\":..., \"minority_prev\":0.01}"
                         " shift: {\"split_col\":...}")
-    p.add_argument("--synthesizer", default="smote", choices=["smote", "great"],
+    p.add_argument("--synthesizer", default="smote", choices=["smote", "great", "pta"],
                    help="合成算法 (默认 smote)")
     p.add_argument("--synth-kwargs", type=str, default="{}",
                    help="合成器参数，JSON 字典字符串，如 '{\"k_neighbors\": 5}'")
