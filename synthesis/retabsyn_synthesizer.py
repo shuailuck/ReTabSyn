@@ -30,7 +30,6 @@ class ReTabSynSynthesizer(BaseTabularSynthesizer):
         random_state: int = 42,
         # ── GReaT checkpoint 路径 ──
         great_checkpoint_path: str = "",
-        great_base_model_path: str = "",
         llm: str = "gpt2",
         guided_sampling: bool = False,
         # ── DPO / 偏好对构建参数 ──
@@ -52,9 +51,8 @@ class ReTabSynSynthesizer(BaseTabularSynthesizer):
         """
         Parameters
         ----------
-        great_checkpoint_path : GReaT checkpoint 目录路径（必填）
-        great_base_model_path : GReaT base model 路径（必填），
-                               通常为 <checkpoint_path>/../base_model
+        great_checkpoint_path : GReaT checkpoint 目录路径（必填），
+                               base model 自动从 {path}/base_model 加载
         llm : 基座 LLM 名称（需与 GReaT checkpoint 一致）
         guided_sampling : 采样时是否使用引导采样
         dpo_epochs : DPO 微调轮数
@@ -72,7 +70,6 @@ class ReTabSynSynthesizer(BaseTabularSynthesizer):
         """
         super().__init__(integer_columns=integer_columns, random_state=random_state)
         self.great_checkpoint_path = great_checkpoint_path
-        self.great_base_model_path = great_base_model_path
         self.llm = llm
         self.guided_sampling = guided_sampling
         self.dpo_epochs = dpo_epochs
@@ -105,8 +102,8 @@ class ReTabSynSynthesizer(BaseTabularSynthesizer):
 
         if not self.great_checkpoint_path:
             raise ValueError("great_checkpoint_path 是必填参数，请指定预训练的 GReaT checkpoint 路径")
-        if not self.great_base_model_path:
-            raise ValueError("great_base_model_path 是必填参数，请指定预训练的 GReaT base model 路径")
+
+        base_model_path = os.path.join(self.great_checkpoint_path, "base_model")
 
         # 1. 加载预训练 GReaT checkpoint
         tokenizer = AutoTokenizer.from_pretrained(self.llm)
@@ -115,7 +112,7 @@ class ReTabSynSynthesizer(BaseTabularSynthesizer):
         self._great_model = GReaT(llm=self.llm, max_length=max_seq_len)
         print(f"[ReTabSyn] 加载 GReaT checkpoint: {self.great_checkpoint_path}")
         self._great_model.load_from_dir(self.great_checkpoint_path)
-        self._great_model.model = AutoModelForCausalLM.from_pretrained(self.great_base_model_path)
+        self._great_model.model = AutoModelForCausalLM.from_pretrained(base_model_path)
         self._great_model._update_column_information(df)
         self._great_model._update_conditional_information(df, cond_col)
 
@@ -139,8 +136,8 @@ class ReTabSynSynthesizer(BaseTabularSynthesizer):
 
         # 3. DPO 微调
         tokenizer.pad_token = tokenizer.eos_token
-        model = AutoModelForCausalLM.from_pretrained(self.great_base_model_path)
-        model_ref = AutoModelForCausalLM.from_pretrained(self.great_base_model_path)
+        model = AutoModelForCausalLM.from_pretrained(base_model_path)
+        model_ref = AutoModelForCausalLM.from_pretrained(base_model_path)
 
         dpo_output_dir = os.path.join(self.checkpoint_dir, "dpo_model")
         training_args = DPOConfig(

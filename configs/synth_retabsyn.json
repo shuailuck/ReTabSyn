@@ -3,7 +3,6 @@
     "synth_kwargs": {
         "llm": "gpt2",
         "great_checkpoint_path": "",
-        "great_base_model_path": "",
         "guided_sampling": false,
         "dpo_epochs": 3,
         "beta": 0.1,

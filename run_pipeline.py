@@ -49,6 +49,7 @@ def run_single_seed(
     metric: str = "auroc",
     scenario_data_dir: str | None = None,
     scenario_label: str = "",
+    synth_output_dir: str | None = None,
 ) -> dict[str, dict[str, float]]:
     """
     单个 seed 的完整流程，返回 {mode: {classifier: score}}。
@@ -81,6 +82,11 @@ def run_single_seed(
     synth.fit(real_train)
     n_samples = n_synth_samples if n_synth_samples is not None else len(real_train)
     synth_df = synth.sample(n_samples=n_samples)
+
+    if synth_output_dir and scenario_label:
+        os.makedirs(synth_output_dir, exist_ok=True)
+        label = f"{synthesizer_name}_{scenario_label}_seed{seed}.csv"
+        synth_df.to_csv(os.path.join(synth_output_dir, label), index=False)
 
     return evaluate_all_modes(
         real_train=real_train,
@@ -171,6 +177,7 @@ def run_pipeline(
     output_csv: str | None = None,
     scenario_data_dir: str | None = None,
     scenario_label: str = "",
+    synth_output_dir: str | None = None,
 ) -> tuple[dict[str, dict[str, tuple[float, float]]], pd.DataFrame]:
     """
     完整 multi-seed 实验入口。
@@ -203,6 +210,7 @@ def run_pipeline(
             metric=metric,
             scenario_data_dir=scenario_data_dir,
             scenario_label=scenario_label,
+            synth_output_dir=synth_output_dir,
         )
         all_results.append(res)
 
@@ -244,7 +252,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--base-seed", type=int, default=42, help="起始随机种子 (默认 42)")
     p.add_argument("--metric", default="auroc", choices=["auroc", "prauc"],
                    help="评估指标 (默认 auroc)")
-    p.add_argument("--output", default=None, help="原始结果 CSV 输出路径")
+    p.add_argument("--output", default=None, help="评估结果 CSV 输出路径")
+    p.add_argument("--synth-output-dir", default=None, help="合成数据 CSV 输出目录")
 
     return p.parse_args()
 
@@ -292,6 +301,7 @@ if __name__ == "__main__":
         output_csv=args.output,
         scenario_data_dir=args.scenario_data_dir,
         scenario_label=args.scenario_label,
+        synth_output_dir=args.synth_output_dir,
     )
 
     _print_results(aggregated)

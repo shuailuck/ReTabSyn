@@ -13,6 +13,7 @@ N_SEEDS=10
 BASE_SEED=42
 RESULTS_DIR="results"
 SCENARIO_DIR="scenario_data"
+SYNTH_DIR="synth_data"
 
 SYNTH_ALGOS=(
     "smote"
@@ -26,7 +27,7 @@ SYNTH_ALGOS=(
 SMALL_NS=(32 64 128 256)
 IMBALANCED_PREVS=(0.01 0.05 0.10)
 
-mkdir -p "$RESULTS_DIR" "$SCENARIO_DIR"
+mkdir -p "$RESULTS_DIR" "$SCENARIO_DIR" "$SYNTH_DIR"
 
 echo "=========================================="
 echo "  ReTabSyn Pipeline - Batch Experiments"
@@ -60,7 +61,8 @@ for N in "${SMALL_NS[@]}"; do
             --scenario-data-dir "$SCENARIO_DIR/small" --scenario-label "$LABEL" \
             --target "$TARGET" --synthesizer "$ALGO" \
             --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
-            --output "$RESULTS_DIR/small_${ALGO}_${LABEL}.csv"
+            --output "$RESULTS_DIR/small_${ALGO}_${LABEL}.csv" \
+            --synth-output-dir "$SYNTH_DIR"
     done
 done
 
@@ -88,7 +90,8 @@ for PREV in "${IMBALANCED_PREVS[@]}"; do
             --scenario-data-dir "$SCENARIO_DIR/imbalanced" --scenario-label "$LABEL" \
             --target "$TARGET" --synthesizer "$ALGO" \
             --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
-            --output "$RESULTS_DIR/imbalanced_${ALGO}_${LABEL}.csv"
+            --output "$RESULTS_DIR/imbalanced_${ALGO}_${LABEL}.csv" \
+            --synth-output-dir "$SYNTH_DIR"
     done
 done
 

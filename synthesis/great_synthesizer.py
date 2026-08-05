@@ -92,10 +92,12 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         cond_col = self.conditional_col or train.columns[0]
         self._model.fit(train, conditional_col=cond_col)
 
-        # 保存训练好的最终模型
+        # 保存 GReaT wrapper + base LLM
         if self.model_save_dir:
             os.makedirs(self.model_save_dir, exist_ok=True)
             self._model.save(self.model_save_dir)
+            base_model_path = os.path.join(self.model_save_dir, "base_model")
+            self._model.model.save_pretrained(base_model_path)
             print(f"[GReaT] 模型已保存至: {self.model_save_dir}")
 
     # -------------------------------------------------------------------
