@@ -4,6 +4,7 @@
         "llm": "distilgpt2",
         "batch_size": 32,
         "epochs": 50,
-        "fp16": true
+        "fp16": true,
+        "n_aug": 0
     }
 }

@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import warnings
 import numpy as np
 import pandas as pd
 
@@ -11,20 +10,15 @@ import pandas as pd
 class TabularDataTransformer:
     """负责表格数据的类型识别、数值边界保护与格式后处理。"""
 
-    def __init__(self, integer_columns: list = None, drop_na: bool = True):
+    def __init__(self, integer_columns: list = None):
         self.integer_columns = integer_columns
-        self.drop_na = drop_na
         self.numeric_cols = []
         self.categorical_cols = []
         self.num_ranges = {}
 
     def fit_preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        """解析列类型，记录数值边界，处理缺失值。"""
+        """解析列类型，记录数值边界。"""
         df_clean = df.copy()
-
-        if self.drop_na and df_clean.isnull().any().any():
-            warnings.warn("Input DataFrame contains NaNs. Dropping missing rows.")
-            df_clean = df_clean.dropna().reset_index(drop=True)
 
         self.numeric_cols = df_clean.select_dtypes(include=[np.number]).columns.tolist()
         self.categorical_cols = [c for c in df_clean.columns if c not in self.numeric_cols]

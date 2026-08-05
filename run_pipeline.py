@@ -51,7 +51,7 @@ def run_single_seed(
     """
     单个 seed 的完整流程，返回 {mode: {classifier: score}}。
     """
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path).dropna().reset_index(drop=True)
 
     scenario = ScenarioFactory.create(scenario_name, seed=seed, **scenario_kwargs)
     real_train, real_test = scenario.build(df)
@@ -85,31 +85,30 @@ def run_single_seed(
 
 
 # ---------------------------------------------------------------------------
-# 原始结果展平
+# 聚合结果转 DataFrame
 # ---------------------------------------------------------------------------
 
-def _flatten_raw_results(
-    all_results: list[dict[str, dict[str, float]]],
-    base_seed: int,
+def _aggregated_to_df(
+    aggregated: dict[str, dict[str, tuple[float, float]]],
     scenario_name: str,
     scenario_kwargs: dict,
+    synthesizer_name: str,
     metric: str,
 ) -> pd.DataFrame:
-    """将多 seed 的嵌套结果展平为长格式 DataFrame。"""
+    """将 Average 聚合结果转为 DataFrame。"""
     rows = []
-    for i, res in enumerate(all_results):
-        seed = base_seed + i
-        for mode, clf_scores in res.items():
-            for clf, score in clf_scores.items():
-                rows.append({
-                    "seed": seed,
-                    "scenario": scenario_name,
-                    **{f"param_{k}": v for k, v in scenario_kwargs.items()},
-                    "mode": mode,
-                    "classifier": clf,
-                    "metric": metric,
-                    "score": score,
-                })
+    for mode, clf_dict in aggregated.items():
+        if "Average" in clf_dict:
+            mean, se = clf_dict["Average"]
+            rows.append({
+                "scenario": scenario_name,
+                **{f"param_{k}": v for k, v in scenario_kwargs.items()},
+                "synthesizer": synthesizer_name,
+                "mode": mode,
+                "metric": metric,
+                "mean": round(mean, 4),
+                "se": round(se, 4),
+            })
     return pd.DataFrame(rows)
 
 
@@ -120,13 +119,21 @@ def _flatten_raw_results(
 def aggregate_results(
     all_results: list[dict[str, dict[str, float]]],
 ) -> dict[str, dict[str, tuple[float, float]]]:
-    """聚合多个 seed 的结果，返回 {mode: {classifier: (mean, se)}}。"""
+    """聚合多个 seed 的结果，返回 {mode: {classifier: (mean, se)}}。
+
+    包含每个分类器的独立结果，以及 "Average" 行（各 seed 内先对分类器取平均，再跨 seed 算 mean±se）。
+    """
     accum: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for res in all_results:
         for mode, clf_scores in res.items():
+            # 每个分类器独立
             for clf, score in clf_scores.items():
                 if not np.isnan(score):
                     accum[mode][clf].append(score)
+            # 跨分类器平均（论文标准做法：每个方法一个数值）
+            valid_scores = [s for s in clf_scores.values() if not np.isnan(s)]
+            if valid_scores:
+                accum[mode]["Average"].append(float(np.mean(valid_scores)))
 
     aggregated: dict[str, dict[str, tuple[float, float]]] = {}
     for mode, clf_dict in accum.items():
@@ -160,9 +167,9 @@ def run_pipeline(
 
     Returns
     -------
-    (aggregated, raw_df)
+    (aggregated, agg_df)
         aggregated : {mode: {classifier: (mean, se)}}
-        raw_df : 每行一个 (seed, mode, classifier) 的长格式 DataFrame
+        agg_df : 聚合结果 DataFrame (mode, classifier, mean, se)
     """
     if synthesizer_kwargs is None:
         synthesizer_kwargs = {}
@@ -184,14 +191,14 @@ def run_pipeline(
         all_results.append(res)
 
     aggregated = aggregate_results(all_results)
-    raw_df = _flatten_raw_results(all_results, base_seed, scenario_name, scenario_kwargs, metric)
+    agg_df = _aggregated_to_df(aggregated, scenario_name, scenario_kwargs, synthesizer_name, metric)
 
     if output_csv is not None:
         os.makedirs(os.path.dirname(output_csv) or ".", exist_ok=True)
-        raw_df.to_csv(output_csv, index=False)
-        print(f"\nRaw results saved to: {output_csv}")
+        agg_df.to_csv(output_csv, index=False)
+        print(f"Results saved to: {output_csv}")
 
-    return aggregated, raw_df
+    return aggregated, agg_df
 
 
 # ---------------------------------------------------------------------------
@@ -226,16 +233,13 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _print_results(result: dict[str, dict[str, tuple[float, float]]]) -> None:
-    modes = ["real", "synthetic", "augment"]
-    for mode in modes:
-        if mode not in result:
-            continue
-        print(f"\n{'=' * 50}")
-        print(f"  Mode: {mode}")
-        print(f"  {'Classifier':<12} {'Mean':>8} {'SE':>8}")
-        print(f"  {'-' * 30}")
-        for clf, (mean, se) in result[mode].items():
-            print(f"  {clf:<12} {mean:>8.4f} {se:>8.4f}")
+    print(f"\n{'=' * 40}")
+    print(f"  {'Mode':<14} {'Mean':>8} {'SE':>8}")
+    print(f"  {'-' * 32}")
+    for mode in ["real", "synthetic", "augment"]:
+        if mode in result and "Average" in result[mode]:
+            mean, se = result[mode]["Average"]
+            print(f"  {mode:<14} {mean:>8.4f} {se:>8.4f}")
 
 
 if __name__ == "__main__":
@@ -253,7 +257,7 @@ if __name__ == "__main__":
     # CLI --synth-kwargs 覆盖配置文件中的值
     synth_kwargs.update(json.loads(args.synth_kwargs))
 
-    aggregated, raw_df = run_pipeline(
+    aggregated, agg_df = run_pipeline(
         csv_path=args.csv,
         scenario_name=args.scenario,
         scenario_kwargs=json.loads(args.scenario_kwargs),

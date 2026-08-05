@@ -2,10 +2,9 @@
     "synthesizer": "retabsyn",
     "synth_kwargs": {
         "llm": "gpt2",
-        "great_epochs": 50,
-        "batch_size": 32,
-        "fp16": true,
-        "n_aug": 0,
+        "great_checkpoint_path": "",
+        "great_base_model_path": "",
+        "guided_sampling": false,
         "dpo_epochs": 3,
         "beta": 0.1,
         "lambda_reg": 0.1

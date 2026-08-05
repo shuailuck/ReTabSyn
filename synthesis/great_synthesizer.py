@@ -1,14 +1,21 @@
+"""
+GReaT 合成器：基于 LLM 的表格数据合成（可选 SMOTE 数据增强）。
+
+Paper: Language Models are Realistic Tabular Data Generators (ICLR 2023)
+"""
+
 import numpy as np
 import pandas as pd
 
+from smote import generate_smote_synthetic
+from DPOUtils import suggest_synthetic_count
 from synthesis.synthesizer import BaseTabularSynthesizer
 
 
 class GreatSynthesizer(BaseTabularSynthesizer):
-    """基于 GReaT (be_great) 的表格数据合成器。
+    """GReaT: 将表格行序列化为文本，微调 LLM 学习数据分布并生成合成样本。
 
-    GReaT 使用预训练语言模型 (如 distilgpt2) 将表格行编码为文本序列，
-    通过微调 LLM 学习数据分布并生成合成样本。
+    可选 SMOTE 数据增强，支持固定数量 / 比例 / 动态建议三种模式。
     """
 
     def __init__(
@@ -21,6 +28,8 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         fp16: bool = True,
         dataloader_num_workers: int = 0,
         float_precision: int | None = None,
+        n_aug: int = 0,
+        conditional_col: str | None = None,
     ):
         """
         Parameters
@@ -31,6 +40,9 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         fp16 : 是否使用混合精度训练
         dataloader_num_workers : DataLoader 工作进程数
         float_precision : 浮点数小数位数限制，None 表示不限制
+        n_aug : SMOTE 增强样本数。>0=固定数量, 0=不增强,
+                -1~-100=训练集的 abs(n_aug) 倍, -114514=动态建议策略
+        conditional_col : 条件列名，None 则使用第一列
         """
         super().__init__(integer_columns=integer_columns, random_state=random_state)
         self.llm = llm
@@ -39,12 +51,26 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         self.fp16 = fp16
         self.dataloader_num_workers = dataloader_num_workers
         self.float_precision = float_precision
+        self.n_aug = n_aug
+        self.conditional_col = conditional_col
+
+    # -------------------------------------------------------------------
+    # Fit
+    # -------------------------------------------------------------------
 
     def _fit(self, df: pd.DataFrame):
         import torch
         from be_great import GReaT
 
         torch.manual_seed(self.random_state)
+        np.random.seed(self.random_state)
+
+        train = df.copy().reset_index(drop=True)
+
+        # SMOTE 数据增强
+        n_aug = self._resolve_n_aug(train)
+        if n_aug > 0:
+            train = self._augment_with_smote(train, n_aug)
 
         extra = {}
         if self.float_precision is not None:
@@ -58,7 +84,13 @@ class GreatSynthesizer(BaseTabularSynthesizer):
             dataloader_num_workers=self.dataloader_num_workers,
             **extra,
         )
-        self._model.fit(df)
+
+        cond_col = self.conditional_col or train.columns[0]
+        self._model.fit(train, conditional_col=cond_col)
+
+    # -------------------------------------------------------------------
+    # Sample
+    # -------------------------------------------------------------------
 
     def _sample(self, n_samples: int) -> pd.DataFrame:
         import torch
@@ -66,3 +98,31 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         torch.manual_seed(self.random_state + 1)
 
         return self._model.sample(n_samples=n_samples)
+
+    # -------------------------------------------------------------------
+    # SMOTE 增强
+    # -------------------------------------------------------------------
+
+    def _resolve_n_aug(self, df: pd.DataFrame) -> int:
+        if self.n_aug == -114514:
+            n = suggest_synthetic_count(df)
+            print(f"[GReaT] 动态建议 SMOTE 增强数: {n}")
+            return n
+        elif self.n_aug < 0:
+            ratio = abs(self.n_aug)
+            n = int(len(df) * ratio)
+            print(f"[GReaT] SMOTE 增强: {n} ({ratio}x 训练集)")
+            return n
+        return self.n_aug
+
+    def _augment_with_smote(self, df: pd.DataFrame, n_aug: int) -> pd.DataFrame:
+        integer_cols = [
+            c for c in df.columns
+            if df[c].dtype in ("int64", "int32", "int16", "int8")
+        ]
+        synth = generate_smote_synthetic(
+            df, n_samples=n_aug,
+            integer_columns=integer_cols,
+            random_state=self.random_state,
+        )
+        return pd.concat([df, synth], ignore_index=True)
