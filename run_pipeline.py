@@ -47,14 +47,22 @@ def run_single_seed(
     target_col: str,
     n_synth_samples: int | None = None,
     metric: str = "auroc",
+    scenario_data_dir: str | None = None,
+    scenario_label: str = "",
 ) -> dict[str, dict[str, float]]:
     """
     单个 seed 的完整流程，返回 {mode: {classifier: score}}。
     """
-    df = pd.read_csv(csv_path).dropna().reset_index(drop=True)
-
-    scenario = ScenarioFactory.create(scenario_name, seed=seed, **scenario_kwargs)
-    real_train, real_test = scenario.build(df)
+    if scenario_data_dir:
+        base = os.path.normpath(scenario_data_dir)
+        train_path = os.path.join(base, f"train_{scenario_label}_seed{seed}.csv")
+        test_path = os.path.join(base, f"test_{scenario_label}_seed{seed}.csv")
+        real_train = pd.read_csv(train_path)
+        real_test = pd.read_csv(test_path)
+    else:
+        df = pd.read_csv(csv_path).dropna().reset_index(drop=True)
+        scenario = ScenarioFactory.create(scenario_name, seed=seed, **scenario_kwargs)
+        real_train, real_test = scenario.build(df)
 
     synth_df = None
     _SYNTHESIZERS = {
@@ -150,9 +158,9 @@ def aggregate_results(
 
 def run_pipeline(
     *,
-    csv_path: str,
-    scenario_name: str,
-    scenario_kwargs: dict,
+    csv_path: str = "",
+    scenario_name: str = "",
+    scenario_kwargs: dict | None = None,
     synthesizer_name: str = "smote",
     synthesizer_kwargs: dict | None = None,
     target_col: str,
@@ -161,22 +169,28 @@ def run_pipeline(
     base_seed: int = 42,
     metric: str = "auroc",
     output_csv: str | None = None,
+    scenario_data_dir: str | None = None,
+    scenario_label: str = "",
 ) -> tuple[dict[str, dict[str, tuple[float, float]]], pd.DataFrame]:
     """
     完整 multi-seed 实验入口。
 
+    scenario_data_dir: 预生成的场景数据目录，若提供则从本地加载
+        (csv_path, scenario_name, scenario_kwargs 将被忽略)。
+
     Returns
     -------
     (aggregated, agg_df)
-        aggregated : {mode: {classifier: (mean, se)}}
-        agg_df : 聚合结果 DataFrame (mode, classifier, mean, se)
     """
     if synthesizer_kwargs is None:
         synthesizer_kwargs = {}
+    if scenario_kwargs is None:
+        scenario_kwargs = {}
 
     all_results: list[dict[str, dict[str, float]]] = []
     for i in range(n_seeds):
         seed = base_seed + i
+
         res = run_single_seed(
             seed=seed,
             csv_path=csv_path,
@@ -187,6 +201,8 @@ def run_pipeline(
             target_col=target_col,
             n_synth_samples=n_synth_samples,
             metric=metric,
+            scenario_data_dir=scenario_data_dir,
+            scenario_label=scenario_label,
         )
         all_results.append(res)
 
@@ -208,15 +224,16 @@ def run_pipeline(
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="ReTabSyn 全流程实验脚本")
 
-    p.add_argument("--csv", required=True, help="原始 CSV 数据路径")
-    p.add_argument("--scenario", required=True, choices=["small", "imbalanced", "shift"],
-                   help="测试场景")
+    p.add_argument("--csv", help="原始 CSV 数据路径（与 --scenario-data-dir 互斥）")
+    p.add_argument("--scenario", choices=["small", "imbalanced", "shift"],
+                   help="测试场景（与 --scenario-data-dir 互斥）")
     p.add_argument("--target", required=True, help="目标列名（用于下游评估）")
     p.add_argument("--scenario-kwargs", type=str, default="{}",
-                   help="场景构造参数，JSON 字典。"
-                        " small: {\"target_col\":..., \"n_samples\":64}"
-                        " imbalanced: {\"target_col\":..., \"minority_prev\":0.01}"
-                        " shift: {\"split_col\":...}")
+                   help="场景构造参数，JSON 字典（与 --scenario-data-dir 互斥）")
+    p.add_argument("--scenario-data-dir", default=None,
+                   help="预生成的场景数据目录（如 scenario_data/small）")
+    p.add_argument("--scenario-label", default="",
+                   help="场景配置标签（如 n32, prev005），用于拼接文件名")
     p.add_argument("--synthesizer", default="smote",
                    choices=["smote", "great", "pta", "tvae", "retabsyn", "cartgenir"],
                    help="合成算法，自动从 configs/synth_<name>.json 加载参数")
@@ -245,6 +262,10 @@ def _print_results(result: dict[str, dict[str, tuple[float, float]]]) -> None:
 if __name__ == "__main__":
     args = _parse_args()
 
+    if not args.scenario_data_dir and (not args.csv or not args.scenario):
+        print("错误: 需要 --csv + --scenario，或使用 --scenario-data-dir 加载预生成数据")
+        sys.exit(1)
+
     # 自动加载 configs/synth_<name>.json
     config_path = f"configs/synth_{args.synthesizer}.json"
     synth_kwargs = {}
@@ -258,8 +279,8 @@ if __name__ == "__main__":
     synth_kwargs.update(json.loads(args.synth_kwargs))
 
     aggregated, agg_df = run_pipeline(
-        csv_path=args.csv,
-        scenario_name=args.scenario,
+        csv_path=args.csv or "",
+        scenario_name=args.scenario or "",
         scenario_kwargs=json.loads(args.scenario_kwargs),
         synthesizer_name=args.synthesizer,
         synthesizer_kwargs=synth_kwargs,
@@ -269,6 +290,8 @@ if __name__ == "__main__":
         base_seed=args.base_seed,
         metric=args.metric,
         output_csv=args.output,
+        scenario_data_dir=args.scenario_data_dir,
+        scenario_label=args.scenario_label,
     )
 
     _print_results(aggregated)

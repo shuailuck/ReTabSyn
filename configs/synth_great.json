@@ -5,6 +5,7 @@
         "batch_size": 32,
         "epochs": 50,
         "fp16": true,
-        "n_aug": 0
+        "n_aug": 0,
+        "model_save_dir": "./great_model"
     }
 }

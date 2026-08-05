@@ -4,6 +4,7 @@ GReaT 合成器：基于 LLM 的表格数据合成（可选 SMOTE 数据增强�
 Paper: Language Models are Realistic Tabular Data Generators (ICLR 2023)
 """
 
+import os
 import numpy as np
 import pandas as pd
 
@@ -30,6 +31,7 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         float_precision: int | None = None,
         n_aug: int = 0,
         conditional_col: str | None = None,
+        model_save_dir: str = "./great_model",
     ):
         """
         Parameters
@@ -43,6 +45,7 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         n_aug : SMOTE 增强样本数。>0=固定数量, 0=不增强,
                 -1~-100=训练集的 abs(n_aug) 倍, -114514=动态建议策略
         conditional_col : 条件列名，None 则使用第一列
+        model_save_dir : 训练完成后模型保存目录 (默认 ./great_model)
         """
         super().__init__(integer_columns=integer_columns, random_state=random_state)
         self.llm = llm
@@ -53,6 +56,7 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         self.float_precision = float_precision
         self.n_aug = n_aug
         self.conditional_col = conditional_col
+        self.model_save_dir = model_save_dir
 
     # -------------------------------------------------------------------
     # Fit
@@ -72,7 +76,7 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         if n_aug > 0:
             train = self._augment_with_smote(train, n_aug)
 
-        extra = {}
+        extra = {"save_strategy": "no"}
         if self.float_precision is not None:
             extra["float_precision"] = self.float_precision
 
@@ -87,6 +91,12 @@ class GreatSynthesizer(BaseTabularSynthesizer):
 
         cond_col = self.conditional_col or train.columns[0]
         self._model.fit(train, conditional_col=cond_col)
+
+        # 保存训练好的最终模型
+        if self.model_save_dir:
+            os.makedirs(self.model_save_dir, exist_ok=True)
+            self._model.save(self.model_save_dir)
+            print(f"[GReaT] 模型已保存至: {self.model_save_dir}")
 
     # -------------------------------------------------------------------
     # Sample
