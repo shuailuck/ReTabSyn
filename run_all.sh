@@ -18,9 +18,9 @@ SYNTH_DIR="synth_data"
 SYNTH_ALGOS=(
     "smote"
     "tvae"
-    # "great"
-    # "pta"
+    # "great"      # 启用 retabsyn 前先启用 great（GReaT 训练→存模型，retabsyn 加载→DPO）
     # "retabsyn"
+    # "pta"
     # "cartgenir"
 )
 

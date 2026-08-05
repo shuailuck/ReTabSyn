@@ -92,13 +92,13 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         cond_col = self.conditional_col or train.columns[0]
         self._model.fit(train, conditional_col=cond_col)
 
-        # 保存 GReaT wrapper + base LLM
+        # 保存 GReaT wrapper + base LLM (按 seed 区分)
         if self.model_save_dir:
-            os.makedirs(self.model_save_dir, exist_ok=True)
-            self._model.save(self.model_save_dir)
-            base_model_path = os.path.join(self.model_save_dir, "base_model")
-            self._model.model.save_pretrained(base_model_path)
-            print(f"[GReaT] 模型已保存至: {self.model_save_dir}")
+            seed_dir = os.path.join(self.model_save_dir, f"seed{self.random_state}")
+            os.makedirs(seed_dir, exist_ok=True)
+            self._model.save(seed_dir)
+            self._model.model.save_pretrained(os.path.join(seed_dir, "base_model"))
+            print(f"[GReaT] 模型已保存至: {seed_dir}")
 
     # -------------------------------------------------------------------
     # Sample
