@@ -6,6 +6,6 @@
         "epochs": 50,
         "fp16": true,
         "n_aug": -114514,
-        "model_save_dir": "./great_model"
+        "model_save_dir": "./great_model/{label}"
     }
 }

@@ -36,12 +36,14 @@ from evaluator.utility import evaluate_all_modes
 # 单 Seed 流程
 # ---------------------------------------------------------------------------
 
-def _resolve_seed_kwargs(kwargs: dict, seed: int) -> dict:
-    """将 kwargs 中字符串值的 {seed} 占位符替换为实际 seed 值。"""
-    return {
-        k: v.replace("{seed}", str(seed)) if isinstance(v, str) else v
-        for k, v in kwargs.items()
-    }
+def _resolve_seed_kwargs(kwargs: dict, seed: int, label: str = "") -> dict:
+    """将 kwargs 中字符串值的 {seed}/{label} 占位符替换为实际值。"""
+    result = {}
+    for k, v in kwargs.items():
+        if isinstance(v, str):
+            v = v.replace("{seed}", str(seed)).replace("{label}", label)
+        result[k] = v
+    return result
 
 
 def run_single_seed(
@@ -86,7 +88,7 @@ def run_single_seed(
     if synth_cls is None:
         raise ValueError(f"未知合成算法: {synthesizer_name}")
 
-    synth = synth_cls(random_state=seed, **_resolve_seed_kwargs(synthesizer_kwargs, seed))
+    synth = synth_cls(random_state=seed, **_resolve_seed_kwargs(synthesizer_kwargs, seed, scenario_label))
     synth.fit(real_train)
     n_samples = n_synth_samples if n_synth_samples is not None else len(real_train)
     synth_df = synth.sample(n_samples=n_samples)

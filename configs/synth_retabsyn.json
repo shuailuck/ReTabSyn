@@ -2,7 +2,7 @@
     "synthesizer": "retabsyn",
     "synth_kwargs": {
         "llm": "distilgpt2",
-        "great_checkpoint_path": "./great_model/seed{seed}",
+        "great_checkpoint_path": "./great_model/{label}/seed{seed}",
         "guided_sampling": false,
         "dpo_epochs": 3,
         "beta": 0.1,
