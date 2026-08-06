@@ -76,6 +76,12 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         if n_aug > 0:
             train = self._augment_with_smote(train, n_aug)
 
+        # 保存增强后的训练数据，供下游（ReTabSyn）使用
+        if self.model_save_dir and n_aug > 0:
+            seed_dir = os.path.join(self.model_save_dir, f"seed{self.random_state}")
+            os.makedirs(seed_dir, exist_ok=True)
+            train.to_csv(os.path.join(seed_dir, "augmented_train.csv"), index=False)
+
         extra = {"save_strategy": "no"}
         if self.float_precision is not None:
             extra["float_precision"] = self.float_precision

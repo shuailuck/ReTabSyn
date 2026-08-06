@@ -116,9 +116,16 @@ class ReTabSynSynthesizer(BaseTabularSynthesizer):
         self._great_model._update_column_information(df)
         self._great_model._update_conditional_information(df, cond_col)
 
-        # 2. 构建 DPO 偏好对
+        # 2. 若 GReaT 使用了 SMOTE 增强，则加载增强后的数据来构建 DPO 偏好对
+        aug_path = os.path.join(self.great_checkpoint_path, "augmented_train.csv")
+        if os.path.exists(aug_path):
+            dpo_df = pd.read_csv(aug_path)
+            print(f"[ReTabSyn] 使用增强数据构建 DPO 偏好对: {dpo_df.shape}")
+        else:
+            dpo_df = df
+
         dataset = create_perturbed_dataset(
-            df, target_column,
+            dpo_df, target_column,
             p=self.split_ratio,
             shuffle=self.shuffle_columns,
             tau=self.tau,
@@ -128,7 +135,7 @@ class ReTabSynSynthesizer(BaseTabularSynthesizer):
         )
 
         if self.minor_to_major_ratio != -1:
-            dataset = self._balance_dataset(dataset, df, target_column)
+            dataset = self._balance_dataset(dataset, dpo_df, target_column)
 
         train_dataset, eval_dataset = dataset.train_test_split(
             test_size=self.test_train_ratio

@@ -217,6 +217,8 @@ def create_perturbed_dataset(df, target, p=0.1, shuffle=False, tau=1.0, min_corr
                     # Categorical perturbation
                     current_value = row[to_perturb_col]
                     other_values = df[to_perturb_col][df[to_perturb_col] != current_value].unique()
+                    if len(other_values) == 0:
+                        continue  # 该列只有单一值，无法扰动
                     perturbed_row[to_perturb_col] = np.random.choice(other_values)
                 else:
                     # Numerical perturbation - randomly select different quantile

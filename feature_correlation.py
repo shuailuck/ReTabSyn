@@ -111,7 +111,7 @@ def create_combined_correlation_matrix(df):
     if len(continuous_columns) > 0:
         num_mat = pd.DataFrame(df[continuous_columns])
         num_mat = fillNa_cont(num_mat)
-        pearson_corr = np.corrcoef(num_mat, rowvar=False)
+        pearson_corr = np.atleast_2d(np.corrcoef(num_mat, rowvar=False))
         for i, col1 in enumerate(continuous_columns):
             for j, col2 in enumerate(continuous_columns):
                 combined_corr.loc[col1, col2] = pearson_corr[i, j]
@@ -120,7 +120,7 @@ def create_combined_correlation_matrix(df):
     if len(categorical_columns) > 0:
         cat_mat = pd.DataFrame(df[categorical_columns])
         cat_mat = fillNa_cate(cat_mat)
-        theils_matrix = theils_u_mat(cat_mat)
+        theils_matrix = np.atleast_2d(theils_u_mat(cat_mat))
         for i, col1 in enumerate(categorical_columns):
             for j, col2 in enumerate(categorical_columns):
                 combined_corr.loc[col1, col2] = theils_matrix[i, j]
