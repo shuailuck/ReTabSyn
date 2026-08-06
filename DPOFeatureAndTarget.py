@@ -241,6 +241,8 @@ def create_perturbed_dataset(df, target, p=0.1, shuffle=False, tau=1.0, min_corr
                     other_quantiles = list(range(actual_quantiles))
                     if current_quantile in other_quantiles:
                         other_quantiles.remove(current_quantile)
+                    if len(other_quantiles) == 0:
+                        continue  # 小数据集只有1个分位，无法扰动
                     new_quantile = np.random.choice(other_quantiles)
                     
                     # Get value range for new quantile
