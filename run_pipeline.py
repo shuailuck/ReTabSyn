@@ -60,7 +60,6 @@ def run_single_seed(
     scenario_data_dir: str | None = None,
     scenario_label: str = "",
     synth_output_dir: str | None = None,
-    icl_eval: bool = False,
 ) -> dict[str, dict[str, float]]:
     """
     单个 seed 的完整流程，返回 {mode: {classifier: score}}。
@@ -108,28 +107,28 @@ def run_single_seed(
         metric=metric,
     )
 
-    if icl_eval:
-        from evaluator.tabpfn_eval import evaluate_tabpfn_icl_all
-        icl = evaluate_tabpfn_icl_all(
-            real_train=real_train,
-            real_test=real_test,
-            synth_df=synth_df,
-            target_col=target_col,
-            seed=seed,
-            metric=metric,
-        )
-        # 将 ICL 结果以 TabPFN_ICL 分类器名注入各 mode
-        mode_map = {"real_only": "real", "synth_only": "synthetic", "real_plus_synth": "augment"}
-        for icl_mode, eval_mode in mode_map.items():
-            if icl_mode in icl and eval_mode in results:
-                results[eval_mode]["TabPFN_ICL"] = icl[icl_mode]
-
     return results
 
 
 # ---------------------------------------------------------------------------
 # 聚合结果转 DataFrame
 # ---------------------------------------------------------------------------
+
+def _raw_to_df(
+    all_results: list[dict[str, dict[str, float]]],
+    base_seed: int,
+) -> pd.DataFrame:
+    """将逐 seed 逐模型明细转为 DataFrame。"""
+    rows = []
+    for i, res in enumerate(all_results):
+        seed = base_seed + i
+        for mode, clf_scores in res.items():
+            for clf, score in clf_scores.items():
+                rows.append({
+                    "seed": seed, "mode": mode, "classifier": clf, "score": round(score, 4),
+                })
+    return pd.DataFrame(rows)
+
 
 def _aggregated_to_df(
     aggregated: dict[str, dict[str, tuple[float, float]]],
@@ -207,7 +206,6 @@ def run_pipeline(
     scenario_data_dir: str | None = None,
     scenario_label: str = "",
     synth_output_dir: str | None = None,
-    icl_eval: bool = False,
 ) -> tuple[dict[str, dict[str, tuple[float, float]]], pd.DataFrame]:
     """
     完整 multi-seed 实验入口。
@@ -241,16 +239,18 @@ def run_pipeline(
             scenario_data_dir=scenario_data_dir,
             scenario_label=scenario_label,
             synth_output_dir=synth_output_dir,
-            icl_eval=icl_eval,
         )
         all_results.append(res)
 
     aggregated = aggregate_results(all_results)
     agg_df = _aggregated_to_df(aggregated, scenario_name, scenario_kwargs, synthesizer_name, metric)
+    raw_df = _raw_to_df(all_results, base_seed)
 
     if output_csv is not None:
         os.makedirs(os.path.dirname(output_csv) or ".", exist_ok=True)
-        agg_df.to_csv(output_csv, index=False)
+        # 聚合结果 + 逐 seed 明细合并保存
+        out_df = pd.concat([agg_df, raw_df], axis=0, ignore_index=True)
+        out_df.to_csv(output_csv, index=False)
         print(f"Results saved to: {output_csv}")
 
     return aggregated, agg_df
@@ -285,8 +285,6 @@ def _parse_args() -> argparse.Namespace:
                    help="评估指标 (默认 auroc)")
     p.add_argument("--output", default=None, help="评估结果 CSV 输出路径")
     p.add_argument("--synth-output-dir", default=None, help="合成数据 CSV 输出目录")
-    p.add_argument("--icl-eval", action="store_true",
-                   help="启用 TabPFN In-Context Learning 评估")
 
     return p.parse_args()
 
@@ -335,7 +333,6 @@ if __name__ == "__main__":
         scenario_data_dir=args.scenario_data_dir,
         scenario_label=args.scenario_label,
         synth_output_dir=args.synth_output_dir,
-        icl_eval=args.icl_eval,
     )
 
     _print_results(aggregated)
