@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# TabICL In-Context Learning 评测脚本
+# TabPFN In-Context Learning 评测脚本
 #
-# 直接读取预生成的场景数据和合成数据，用 TabICL 做 ICL 推理。
+# 直接读取预生成的场景数据和合成数据，用 TabPFN 做 ICL 推理。
 # 场景数据和合成数据由 run_all.sh 产出。
 #
 
@@ -10,7 +10,7 @@ set -e
 
 SCENARIO_DIR="scenario_data"
 SYNTH_DIR="synth_data"
-RESULTS_DIR="results/tabicl"
+RESULTS_DIR="results/tabpfn"
 TARGET="class"
 N_SEEDS=10
 BASE_SEED=42
@@ -28,7 +28,7 @@ ALGO_LIST=$(IFS=,; echo "${SYNTH_ALGOS[*]}")
 mkdir -p "$RESULTS_DIR"
 
 echo "=========================================="
-echo "  TabICL ICL Evaluation"
+echo "  TabPFN ICL Evaluation"
 echo "  Scenario: $SCENARIO_DIR"
 echo "  Synth: $SYNTH_DIR"
 echo "  Target: $TARGET"
@@ -45,7 +45,7 @@ for N in "${SMALL_NS[@]}"; do
     LABEL_LIST="$LABEL"
     echo ""
     echo "--- small/$LABEL ---"
-    python run_tabicl_eval.py \
+    python run_tabpfn_eval.py \
         --scenario-dir "$SCENARIO_DIR/small" \
         --synth-dir "$SYNTH_DIR" \
         --synth-algos "$ALGO_LIST" \
@@ -64,7 +64,7 @@ for PREV in "${IMBALANCED_PREVS[@]}"; do
     LABEL_LIST="$LABEL"
     echo ""
     echo "--- imbalanced/$LABEL ---"
-    python run_tabicl_eval.py \
+    python run_tabpfn_eval.py \
         --scenario-dir "$SCENARIO_DIR/imbalanced" \
         --synth-dir "$SYNTH_DIR" \
         --synth-algos "$ALGO_LIST" \

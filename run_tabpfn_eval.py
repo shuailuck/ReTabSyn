@@ -1,8 +1,8 @@
 """
-run_tabicl_eval.py: TabICL In-Context Learning 评估。
+run_tabpfn_eval.py: TabPFN In-Context Learning 评估。
 
-利用合成数据作为 TabICL 的额外 context examples，增强对 test 数据的推理能力。
-TabICL 无需训练 —— 前向传播时直接使用 context 样本进行 in-context 推理。
+利用合成数据作为 TabPFN 的额外 context examples，增强对 test 数据的推理能力。
+TabPFN 无需训练 —— 前向传播时直接使用 context 样本进行 in-context 推理。
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ from sklearn.metrics import roc_auc_score, average_precision_score
 
 
 # ===========================================================================
-# TabICL ICL 核心评估
+# TabPFN ICL 核心评估
 # ===========================================================================
 
-def _evaluate_tabicl_icl(
+def _evaluate_tabpfn_icl(
     *,
     real_train: pd.DataFrame,
     real_test: pd.DataFrame,
@@ -29,15 +29,19 @@ def _evaluate_tabicl_icl(
     metric: str = "auroc",
     max_context: int = 2000,
     weight_synth: float = 0.5,
+    filter_mode: str = "none",
+    max_synth_ratio: float = 3.0,
 ) -> float:
     """
-    合成数据作为 TabICL 的额外 context examples，增强推理能力。
+    TabPFN In-Context Learning 评估。
 
     Parameters
     ----------
-    weight_synth : 合成样本在 context 中的权重比例 [0, 1]
+    weight_synth : 合成样本在 context 中的比例 [0, 1]，filter_mode="none" 时使用
+    filter_mode : "none" 全部混入 | "density+ratio" 密度过滤 + 配比控制
+    max_synth_ratio : filter_mode="density+ratio" 时 synth:real 最大比 (default 3.0)
     """
-    from tabicl import TabICLClassifier
+    from tabpfn import TabPFNClassifier
 
     np.random.seed(seed)
 
@@ -54,28 +58,46 @@ def _evaluate_tabicl_icl(
     y_train_enc = le.transform(y_train.astype(str))
     y_test_enc = le.transform(y_test.astype(str))
 
-    # 构建 context: 合成样本占 weight_synth 比例
-    n_context = min(max_context, len(X_train) + (len(X_synth) if X_synth is not None else 0))
-    n_synth = int(n_context * weight_synth) if X_synth is not None else 0
-    n_synth = min(n_synth, len(X_synth)) if X_synth is not None else 0
-    n_real = n_context - n_synth
+    # ── #1: 密度筛选 — Isolation Forest 过滤合成数据中的离群点 ──
+    if filter_mode == "density+ratio" and X_synth is not None and len(X_synth) > 0:
+        X_synth, y_synth_raw = _filter_by_isolation_forest(
+            X_train, X_synth, synth_df, target_col, le, seed
+        )
+    else:
+        y_synth_raw = synth_df[target_col] if synth_df is not None and target_col in (synth_df.columns if synth_df is not None else []) else None
+
+    # ── 构建 context ──
+    if filter_mode == "density+ratio":
+        # #3: 配比控制 — synth:real 不超过 max_synth_ratio
+        n_real_use = min(len(X_train), max_context // 2)
+        n_synth_max = min(int(n_real_use * max_synth_ratio), max_context - n_real_use)
+        n_synth_use = min(len(X_synth), n_synth_max) if X_synth is not None else 0
+    else:
+        # 原有逻辑：一股脑混入
+        n_context = min(max_context, len(X_train) + (len(X_synth) if X_synth is not None else 0))
+        n_synth_use = int(n_context * weight_synth) if X_synth is not None else 0
+        n_synth_use = min(n_synth_use, len(X_synth)) if X_synth is not None else 0
+        n_real_use = n_context - n_synth_use
 
     context_X, context_y = [], []
-    if n_real > 0:
-        idx = np.random.choice(len(X_train), size=min(n_real, len(X_train)), replace=False)
+    if n_real_use > 0:
+        idx = np.random.choice(len(X_train), size=min(n_real_use, len(X_train)), replace=False)
         context_X.append(X_train[idx])
         context_y.append(y_train_enc[idx])
-    if n_synth > 0 and X_synth is not None and synth_df is not None and target_col in synth_df.columns:
-        y_synth_enc = le.transform(synth_df[target_col].astype(str))
-        idx = np.random.choice(len(X_synth), size=n_synth, replace=False)
+    if n_synth_use > 0 and X_synth is not None:
+        idx = np.random.choice(len(X_synth), size=n_synth_use, replace=False)
         context_X.append(X_synth[idx])
-        context_y.append(y_synth_enc[idx])
+        if y_synth_raw is not None:
+            context_y.append(le.transform(y_synth_raw[idx].astype(str)))
+        else:
+            # fallback: use train labels
+            context_y.append(y_train_enc[:n_synth_use])
 
     X_context = np.vstack(context_X) if context_X else X_train
     y_context = np.concatenate(context_y) if context_y else y_train_enc
-    print(f"  TabICL context: {len(y_context)} samples (real={n_real}, synth={n_synth})")
+    print(f"  TabPFN context: {len(y_context)} samples (real={n_real_use}, synth={n_synth_use}, mode={filter_mode})")
 
-    clf = TabICLClassifier(random_state=seed, n_estimators=4)
+    clf = TabPFNClassifier(random_state=seed, n_estimators=4)
     clf.fit(X_context, y_context)
     y_prob = clf.predict_proba(X_test)
 
@@ -89,6 +111,38 @@ def _evaluate_tabicl_icl(
     return float(roc_auc_score(y_test_enc, y_prob, multi_class="ovr", average="macro"))
 
 
+# ---------------------------------------------------------------------------
+# Isolation Forest 密度筛选
+# ---------------------------------------------------------------------------
+
+def _filter_by_isolation_forest(
+    X_train: np.ndarray,
+    X_synth: np.ndarray,
+    synth_df: pd.DataFrame,
+    target_col: str,
+    label_encoder: LabelEncoder,
+    seed: int,
+) -> tuple[np.ndarray, pd.Series]:
+    """用 Isolation Forest 在真实数据上拟合，剔除合成数据中的离群点。
+
+    Returns
+    -------
+    (filtered_X_synth, filtered_y_synth)
+    """
+    from sklearn.ensemble import IsolationForest
+
+    iso = IsolationForest(random_state=seed, contamination=0.1)
+    iso.fit(X_train)
+    # 预测合成样本：1=inlier, -1=outlier
+    preds = iso.predict(X_synth)
+    mask = preds == 1
+    n_removed = (~mask).sum()
+    if n_removed > 0:
+        print(f"  [IF] 过滤掉 {n_removed}/{len(X_synth)} 条合成样本")
+    y_synth = synth_df[target_col]
+    return X_synth[mask], y_synth[mask].reset_index(drop=True)
+
+
 def _evaluate_all_modes(
     *,
     real_train: pd.DataFrame,
@@ -99,22 +153,40 @@ def _evaluate_all_modes(
     metric: str = "auroc",
     max_context: int = 2000,
 ) -> dict[str, float]:
-    """对比 real_only / synth_only / real_plus_synth 三种 context 策略。"""
+    """对比多种 context 策略。
+
+    real_only : 仅真实数据
+    synth_only : 全部合成数据（一股脑）
+    real_plus_synth : 真实+合成混入（一股脑）
+    synth_filtered : 合成数据经 IF 过滤 + 配比控制
+    real_plus_synth_filtered : 真实 + IF 过滤合成 + 配比控制
+    """
     results = {}
-    results["real_only"] = _evaluate_tabicl_icl(
+    results["real_only"] = _evaluate_tabpfn_icl(
         real_train=real_train, real_test=real_test, synth_df=None,
         target_col=target_col, seed=seed, metric=metric, max_context=max_context,
     )
     if synth_df is not None and len(synth_df) >= 10:
-        results["synth_only"] = _evaluate_tabicl_icl(
+        results["synth_only"] = _evaluate_tabpfn_icl(
             real_train=real_train, real_test=real_test, synth_df=synth_df,
             target_col=target_col, seed=seed, metric=metric, max_context=max_context,
-            weight_synth=1.0,
+            weight_synth=1.0, filter_mode="none",
         )
-        results["real_plus_synth"] = _evaluate_tabicl_icl(
+        results["real_plus_synth"] = _evaluate_tabpfn_icl(
             real_train=real_train, real_test=real_test, synth_df=synth_df,
             target_col=target_col, seed=seed, metric=metric, max_context=max_context,
-            weight_synth=0.5,
+            weight_synth=0.5, filter_mode="none",
+        )
+        # ── 新策略: IF 密度筛选 + 配比控制 ──
+        results["synth_filtered"] = _evaluate_tabpfn_icl(
+            real_train=real_train, real_test=real_test, synth_df=synth_df,
+            target_col=target_col, seed=seed, metric=metric, max_context=max_context,
+            filter_mode="density+ratio",
+        )
+        results["real_plus_synth_filtered"] = _evaluate_tabpfn_icl(
+            real_train=real_train, real_test=real_test, synth_df=synth_df,
+            target_col=target_col, seed=seed, metric=metric, max_context=max_context,
+            weight_synth=0.5, filter_mode="density+ratio",
         )
     return results
 
@@ -200,7 +272,8 @@ def run(
             print(f"  {label} / {algo}")
             print(f"  {'Mode':<18} {'Mean':>8} {'SE':>8}")
             print(f"  {'-' * 36}")
-            for mode in ["real_only", "synth_only", "real_plus_synth"]:
+            for mode in ["real_only", "synth_only", "real_plus_synth",
+                          "synth_filtered", "real_plus_synth_filtered"]:
                 vals = all_scores.get(mode, [])
                 if vals:
                     arr = np.array(vals)
@@ -220,7 +293,7 @@ def run(
 
 
 def _parse_args():
-    p = argparse.ArgumentParser(description="TabICL ICL 评估")
+    p = argparse.ArgumentParser(description="TabPFN ICL 评估")
     p.add_argument("--scenario-dir", required=True, help="场景数据目录 (如 scenario_data/small)")
     p.add_argument("--synth-dir", required=True, help="合成数据目录 (如 synth_data)")
     p.add_argument("--synth-algos", type=str, required=True,

@@ -95,6 +95,12 @@ class GreatSynthesizer(BaseTabularSynthesizer):
             **extra,
         )
 
+        # 计算 max_length 防止采样时截断
+        from transformers import AutoTokenizer
+        from DPOUtils import calculate_max_seq_len
+        tokenizer = AutoTokenizer.from_pretrained(self.llm)
+        self._max_seq_len = calculate_max_seq_len(train, tokenizer)
+
         cond_col = self.conditional_col or train.columns[0]
         self._model.fit(train, conditional_col=cond_col)
 
@@ -115,7 +121,7 @@ class GreatSynthesizer(BaseTabularSynthesizer):
 
         torch.manual_seed(self.random_state + 1)
 
-        return self._model.sample(n_samples=n_samples)
+        return self._model.sample(n_samples=n_samples, max_length=self._max_seq_len)
 
     # -------------------------------------------------------------------
     # SMOTE 增强
