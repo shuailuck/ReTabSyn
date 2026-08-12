@@ -50,6 +50,7 @@ for N in "${SMALL_NS[@]}"; do
         --synth-dir "$SYNTH_DIR" \
         --synth-algos "$ALGO_LIST" \
         --labels "$LABEL_LIST" \
+        --scenario small \
         --target "$TARGET" \
         --base-seed "$BASE_SEED" --n-seeds "$N_SEEDS" \
         --output "$RESULTS_DIR/small_${LABEL}.csv"
@@ -69,6 +70,7 @@ for PREV in "${IMBALANCED_PREVS[@]}"; do
         --synth-dir "$SYNTH_DIR" \
         --synth-algos "$ALGO_LIST" \
         --labels "$LABEL_LIST" \
+        --scenario imbalanced \
         --target "$TARGET" \
         --base-seed "$BASE_SEED" --n-seeds "$N_SEEDS" \
         --output "$RESULTS_DIR/imbalanced_${LABEL}.csv"

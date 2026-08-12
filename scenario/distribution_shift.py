@@ -21,11 +21,10 @@ class DistributionShiftScenario(BaseScenario):
         if len(counts) < 2:
             raise ValueError(f"列 '{self.split_col}' 类别数少于 2，无法切分。")
 
-        # 将样本最多的组设为 Train，最少的组设为 Test
+        # 将样本最多的组设为 Train，其余所有组为 Test
         train_group = counts.index[0]
-        test_group = counts.index[-1]
 
         train_df = df[df[self.split_col] == train_group].drop(columns=[self.split_col]).reset_index(drop=True)
-        test_df = df[df[self.split_col] == test_group].drop(columns=[self.split_col]).reset_index(drop=True)
+        test_df = df[df[self.split_col] != train_group].drop(columns=[self.split_col]).reset_index(drop=True)
 
         return train_df, test_df

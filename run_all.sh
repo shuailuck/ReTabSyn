@@ -96,13 +96,14 @@ for PREV in "${IMBALANCED_PREVS[@]}"; do
 done
 
 # ====================================================================
-# Distribution Shift 场景 (需要含 split_col 的数据集)
+# Distribution Shift 场景 (需要含 split_col 的数据集，例如 wilt 的 "class")
 # ====================================================================
 # echo ""
 # echo "========== Distribution Shift =========="
 #
-# LABEL="default"
-# KWARGS="{\"split_col\": \"your_column\"}"
+# SPLIT_COL="class"
+# LABEL="${SPLIT_COL}"
+# KWARGS="{\"split_col\": \"$SPLIT_COL\"}"
 # DATA_DIR="$SCENARIO_DIR/shift/$LABEL"
 #
 # python generate_scenario_data.py \
@@ -114,9 +115,11 @@ done
 #     echo ""
 #     echo ">>> shift/$LABEL | $ALGO"
 #     python run_pipeline.py \
-#         --scenario-data-dir "$DATA_DIR" --target "$TARGET" \
-#         --synthesizer "$ALGO" --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
-#         --output "$RESULTS_DIR/shift_${ALGO}_${LABEL}.csv"
+#         --scenario-data-dir "$SCENARIO_DIR/shift" --scenario-label "$LABEL" \
+#         --target "$TARGET" --synthesizer "$ALGO" \
+#         --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
+#         --output "$RESULTS_DIR/shift_${ALGO}_${LABEL}.csv" \
+#         --synth-output-dir "$SYNTH_DIR"
 # done
 
 echo ""

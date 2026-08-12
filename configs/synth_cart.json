@@ -1,0 +1,7 @@
+{
+    "synthesizer": "cart",
+    "synth_kwargs": {
+        "tree_max_depth": 5,
+        "tree_min_samples_leaf": 5
+    }
+}

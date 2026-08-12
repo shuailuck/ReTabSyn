@@ -29,6 +29,7 @@ from synthesis.pta_synthesizer import PTASynthesizer
 from synthesis.tvae_synthesizer import TVAESynthesizer
 from synthesis.retabsyn_synthesizer import ReTabSynSynthesizer
 from synthesis.cartgenir_synthesizer import CARTGenIRSynthesizer
+from synthesis.cart_synthesizer import CARTSynthesizer
 from evaluator.utility import evaluate_all_modes
 
 
@@ -65,6 +66,8 @@ def run_single_seed(
     单个 seed 的完整流程，返回 {mode: {classifier: score}}。
     """
     if scenario_data_dir:
+        if not scenario_label:
+            raise ValueError("--scenario-label 不能为空（使用预生成场景数据时必填）")
         base = os.path.normpath(scenario_data_dir)
         train_path = os.path.join(base, f"train_{scenario_label}_seed{seed}.csv")
         test_path = os.path.join(base, f"test_{scenario_label}_seed{seed}.csv")
@@ -82,6 +85,7 @@ def run_single_seed(
         "pta": PTASynthesizer,
         "tvae": TVAESynthesizer,
         "retabsyn": ReTabSynSynthesizer,
+        "cart": CARTSynthesizer,
         "cartgenir": CARTGenIRSynthesizer,
     }
     synth_cls = _SYNTHESIZERS.get(synthesizer_name)
@@ -95,7 +99,8 @@ def run_single_seed(
 
     if synth_output_dir and scenario_label:
         os.makedirs(synth_output_dir, exist_ok=True)
-        label = f"{synthesizer_name}_{scenario_label}_seed{seed}.csv"
+        scenario = scenario_name or os.path.basename(os.path.normpath(scenario_data_dir or ""))
+        label = f"{scenario}_{synthesizer_name}_{scenario_label}_seed{seed}.csv"
         synth_df.to_csv(os.path.join(synth_output_dir, label), index=False)
 
     results = evaluate_all_modes(
@@ -274,7 +279,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--scenario-label", default="",
                    help="场景配置标签（如 n32, prev005），用于拼接文件名")
     p.add_argument("--synthesizer", default="smote",
-                   choices=["smote", "great", "pta", "tvae", "retabsyn", "cartgenir"],
+                   choices=["smote", "great", "pta", "tvae", "retabsyn", "cart", "cartgenir"],
                    help="合成算法，自动从 configs/synth_<name>.json 加载参数")
     p.add_argument("--synth-kwargs", type=str, default="{}",
                    help="合成器参数覆盖，JSON 字典，如 '{\"k_neighbors\": 5}'（会覆盖配置文件中的同名字段）")
