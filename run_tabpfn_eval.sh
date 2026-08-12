@@ -76,5 +76,24 @@ for PREV in "${IMBALANCED_PREVS[@]}"; do
         --output "$RESULTS_DIR/imbalanced_${LABEL}.csv"
 done
 
+# ── Distribution Shift (需要含 split_col 的数据集) ──────
+# echo ""
+# echo "========== Distribution Shift =========="
+#
+# SPLIT_COL="class"
+# LABEL="${SPLIT_COL}"
+# LABEL_LIST="$LABEL"
+# echo ""
+# echo "--- shift/$LABEL ---"
+# python run_tabpfn_eval.py \
+#     --scenario-dir "$SCENARIO_DIR/shift" \
+#     --synth-dir "$SYNTH_DIR" \
+#     --synth-algos "$ALGO_LIST" \
+#     --labels "$LABEL_LIST" \
+#     --scenario shift \
+#     --target "$TARGET" \
+#     --base-seed "$BASE_SEED" --n-seeds "$N_SEEDS" \
+#     --output "$RESULTS_DIR/shift_${LABEL}.csv"
+
 echo ""
 echo "Done."
