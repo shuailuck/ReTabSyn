@@ -102,24 +102,27 @@ done
 # echo "========== Distribution Shift =========="
 #
 # SPLIT_COL="class"
-# LABEL="${SPLIT_COL}"
-# KWARGS="{\"split_col\": \"$SPLIT_COL\"}"
-# DATA_DIR="$SCENARIO_DIR/shift/$LABEL"
+# SHIFT_NS=(32 64 128 256 512)
 #
-# python generate_scenario_data.py \
-#     --csv "$CSV" --target "$TARGET" \
-#     --scenarios "{\"shift\": [[\"$LABEL\", $KWARGS]]}" \
-#     --output-dir "$SCENARIO_DIR" --base-seed "$BASE_SEED" --n-seeds "$N_SEEDS"
+# for N in "${SHIFT_NS[@]}"; do
+#     LABEL="n${N}"
+#     KWARGS="{\"split_col\": \"$SPLIT_COL\", \"target_col\": \"$TARGET\", \"n_train\": $N, \"n_test\": $N}"
 #
-# for ALGO in "${SYNTH_ALGOS[@]}"; do
-#     echo ""
-#     echo ">>> shift/$LABEL | $ALGO"
-#     python run_pipeline.py \
-#         --scenario-data-dir "$SCENARIO_DIR/shift" --scenario-label "$LABEL" \
-#         --target "$TARGET" --synthesizer "$ALGO" \
-#         --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
-#         --output "$RESULTS_DIR/shift_${ALGO}_${LABEL}.csv" \
-#         --synth-output-dir "$SYNTH_DIR"
+#     python generate_scenario_data.py \
+#         --csv "$CSV" --target "$TARGET" \
+#         --scenarios "{\"shift\": [[\"$LABEL\", $KWARGS]]}" \
+#         --output-dir "$SCENARIO_DIR" --base-seed "$BASE_SEED" --n-seeds "$N_SEEDS"
+#
+#     for ALGO in "${SYNTH_ALGOS[@]}"; do
+#         echo ""
+#         echo ">>> shift/$LABEL | $ALGO"
+#         python run_pipeline.py \
+#             --scenario-data-dir "$SCENARIO_DIR/shift" --scenario-label "$LABEL" \
+#             --target "$TARGET" --synthesizer "$ALGO" \
+#             --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
+#             --output "$RESULTS_DIR/shift_${ALGO}_${LABEL}.csv" \
+#             --synth-output-dir "$SYNTH_DIR"
+#     done
 # done
 
 echo ""

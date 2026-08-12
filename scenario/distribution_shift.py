@@ -9,9 +9,14 @@ from scenario.scenario import BaseScenario
 class DistributionShiftScenario(BaseScenario):
     """Distribution Shift 场景：按指定敏感/人口列拆分 Train/Test 并移除切分列"""
 
-    def __init__(self, split_col: str, seed: int = 42):
+    def __init__(self, split_col: str, seed: int = 42,
+                 n_train: int | None = None, n_test: int | None = None,
+                 target_col: str | None = None):
         super().__init__(seed=seed)
         self.split_col = split_col
+        self.n_train = n_train
+        self.n_test = n_test
+        self.target_col = target_col
 
     def build(self, df: pd.DataFrame, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
         if self.split_col not in df.columns:
@@ -26,5 +31,12 @@ class DistributionShiftScenario(BaseScenario):
 
         train_df = df[df[self.split_col] == train_group].drop(columns=[self.split_col]).reset_index(drop=True)
         test_df = df[df[self.split_col] != train_group].drop(columns=[self.split_col]).reset_index(drop=True)
+
+        if self.n_train and len(train_df) > self.n_train:
+            train_df = self._subsample(train_df, self.n_train, seed=self.seed,
+                                       target_col=self.target_col)
+        if self.n_test and len(test_df) > self.n_test:
+            test_df = self._subsample(test_df, self.n_test, seed=self.seed + 100,
+                                      target_col=self.target_col)
 
         return train_df, test_df

@@ -7,25 +7,43 @@ from synthesis.synthesizer import BaseTabularSynthesizer
 # ===========================================================================
 
 class SmoteSynthesizer(BaseTabularSynthesizer):
-    """基于类别 Bucket 内 KNN 线性插值的 SMOTE 合成器"""
+    """基于类别 Bucket 内 KNN 线性插值的 SMOTE 合成器
 
-    def __init__(self, integer_columns: list = None, random_state: int = 42, k_neighbors: int = 5):
+    支持 target_classes 定点合成：仅从指定目标列的类别值所在 bucket 合成样本。
+    """
+
+    def __init__(self, integer_columns: list = None, random_state: int = 42,
+                 k_neighbors: int = 5, target_col: str | None = None,
+                 target_classes: list | None = None):
         super().__init__(integer_columns=integer_columns, random_state=random_state)
         self.k_neighbors = k_neighbors
+        self.target_col = target_col
+        self.target_classes = target_classes
         self.buckets = []
         self.bucket_probs = None
 
     def _fit(self, df: pd.DataFrame):
         cat_cols = self.transformer.categorical_cols
 
-        # 根据类别特征分桶
         if cat_cols:
             self.buckets = [group.reset_index(drop=True) for _, group in df.groupby(cat_cols)]
-            sizes = np.array([len(b) for b in self.buckets], dtype=float)
-            self.bucket_probs = sizes / sizes.sum()
         else:
             self.buckets = [df.reset_index(drop=True)]
-            self.bucket_probs = np.array([1.0])
+
+        # 定点合成：仅保留目标类别的 bucket
+        if self.target_col and self.target_classes and self.target_col in cat_cols:
+            filtered = []
+            for b in self.buckets:
+                val = b[self.target_col].iloc[0]
+                if val in self.target_classes:
+                    filtered.append(b)
+            if filtered:
+                self.buckets = filtered
+                print(f"[SMOTE] 定点合成 target={self.target_col} classes={self.target_classes}, "
+                      f"buckets={len(filtered)}/{len(self.buckets)}")
+
+        sizes = np.array([len(b) for b in self.buckets], dtype=float)
+        self.bucket_probs = sizes / sizes.sum()
 
     def _sample(self, n_samples: int) -> pd.DataFrame:
         num_cols = self.transformer.numeric_cols
