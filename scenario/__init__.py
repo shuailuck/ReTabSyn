@@ -6,6 +6,7 @@ from scenario.scenario import BaseScenario
 from scenario.small_data import SmallDataScenario
 from scenario.imbalanced import ImbalancedDataScenario
 from scenario.distribution_shift import DistributionShiftScenario
+from scenario.noisy_label import NoisyLabelScenario
 
 
 class ScenarioFactory:
@@ -15,6 +16,7 @@ class ScenarioFactory:
         "small": SmallDataScenario,
         "imbalanced": ImbalancedDataScenario,
         "shift": DistributionShiftScenario,
+        "noisy_label": NoisyLabelScenario,
     }
 
     @classmethod
@@ -30,5 +32,6 @@ __all__ = [
     "SmallDataScenario",
     "ImbalancedDataScenario",
     "DistributionShiftScenario",
+    "NoisyLabelScenario",
     "ScenarioFactory",
 ]
