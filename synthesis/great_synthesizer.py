@@ -32,6 +32,7 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         n_aug: int = 0,
         conditional_col: str | None = None,
         model_save_dir: str = "./great_model",
+        target_class: str | None = None,
     ):
         """
         Parameters
@@ -42,6 +43,7 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         fp16 : 是否使用混合精度训练
         dataloader_num_workers : DataLoader 工作进程数
         float_precision : 浮点数小数位数限制，None 表示不限制
+        target_class : 仅合成该目标类别的样本（如 'all other land cover'）
         n_aug : SMOTE 增强样本数。>0=固定数量, 0=不增强,
                 -1~-100=训练集的 abs(n_aug) 倍, -114514=动态建议策略
         conditional_col : 条件列名，None 则使用第一列
@@ -57,6 +59,7 @@ class GreatSynthesizer(BaseTabularSynthesizer):
         self.n_aug = n_aug
         self.conditional_col = conditional_col
         self.model_save_dir = model_save_dir
+        self.target_class = target_class
 
     # -------------------------------------------------------------------
     # Fit
@@ -121,6 +124,13 @@ class GreatSynthesizer(BaseTabularSynthesizer):
 
         torch.manual_seed(self.random_state + 1)
 
+        if self.target_class:
+            target_col = self.conditional_col or self._model.columns[-1]
+            return self._model.sample(
+                n_samples=n_samples, max_length=self._max_seq_len,
+                start_col=target_col,
+                start_col_dist={self.target_class: 1.0},
+            )
         return self._model.sample(n_samples=n_samples, max_length=self._max_seq_len)
 
     # -------------------------------------------------------------------
