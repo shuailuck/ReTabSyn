@@ -1,20 +1,20 @@
 """
 pipeline.py: ReTabSyn 全流程流水线。
 
-三阶段: 1=场景生成, 2=合成, 3=评估。
-对每个 seed 执行: 场景数据生成 → 合成 → 评估（由 scenario 内部编排）。
+完整流程：场景数据生成 → 合成 → 评估（默认全部执行）。
+对每个 seed 由 scenario 内部编排三阶段。
 """
 
 from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 import numpy as np
 import pandas as pd
 from collections import defaultdict
 
 from scenario import ScenarioFactory
+from scenario.scenario import SaveConfig
 from synthesis.smote_synthesizer import SmoteSynthesizer
 from synthesis.great_synthesizer import GreatSynthesizer
 from synthesis.pta_synthesizer import PTASynthesizer
@@ -34,54 +34,6 @@ SYNTHESIZERS = {
 }
 
 
-# ===========================================================================
-# Stage 1: 场景数据生成
-# ===========================================================================
-
-def generate_scenario_data(
-    csv_path: str,
-    target_col: str,
-    scenarios: dict,
-    output_dir: str = "scenario_data",
-    base_seed: int = 42,
-    n_seeds: int = 10,
-) -> None:
-    """生成所有场景/配置/seed 的 train/test 切分并保存。"""
-    df = pd.read_csv(csv_path).dropna().reset_index(drop=True)
-
-    for scenario_name, configs in scenarios.items():
-        scenario_dir = os.path.join(os.path.normpath(output_dir), scenario_name)
-        os.makedirs(scenario_dir, exist_ok=True)
-
-        for label, kwargs in configs:
-            kwargs = dict(kwargs)
-            if "target_col" in kwargs:
-                kwargs["target_col"] = target_col
-
-            for i in range(n_seeds):
-                seed = base_seed + i
-                scenario = ScenarioFactory.create(scenario_name, seed=seed, **kwargs)
-                scenario.build(df)
-
-                scenario.train_df.to_csv(
-                    os.path.join(scenario_dir, f"train_{label}_seed{seed}.csv"), index=False)
-                scenario.test_df.to_csv(
-                    os.path.join(scenario_dir, f"test_{label}_seed{seed}.csv"), index=False)
-
-                # 场景附加数据（如 NoisyLabel 的 clean_train）
-                clean_train = getattr(scenario, "clean_train", None)
-                if clean_train is not None:
-                    clean_train.to_csv(
-                        os.path.join(scenario_dir, f"clean_train_{label}_seed{seed}.csv"), index=False)
-
-                print(f"[generate] {scenario_name}/{label}/seed{seed} "
-                      f"train={scenario.train_df.shape} test={scenario.test_df.shape}")
-
-
-# ===========================================================================
-# Stage 2+3: 合成 + 评估
-# ===========================================================================
-
 def _resolve_seed_kwargs(kwargs: dict, seed: int, label: str = "") -> dict:
     result = {}
     for k, v in kwargs.items():
@@ -91,87 +43,63 @@ def _resolve_seed_kwargs(kwargs: dict, seed: int, label: str = "") -> dict:
     return result
 
 
-def run_single_seed(
+def run_pipeline(
     *,
-    seed: int,
-    scenario,
+    csv_path: str,
+    scenario_name: str,
+    scenario_label: str,
+    scenario_kwargs: dict,
     synthesizer_name: str,
-    synthesizer_kwargs: dict,
-    target_col: str,
-    n_synth_samples: int | None,
-    scenario_label: str = "",
-    synth_output_dir: str | None = None,
-    scenario_name: str = "",
-) -> dict:
-    """单 seed: 合成 + 评估。"""
-    synth_cls = SYNTHESIZERS.get(synthesizer_name)
-    if synth_cls is None:
-        raise ValueError(f"未知合成算法: {synthesizer_name}")
-
-    kwargs = _resolve_seed_kwargs(synthesizer_kwargs, seed, scenario_label)
-    synth_df = scenario.synthesize(synth_cls, kwargs, n_synth_samples)
-
-    if synth_output_dir and scenario_label:
-        os.makedirs(synth_output_dir, exist_ok=True)
-        fname = f"{scenario_name}_{synthesizer_name}_{scenario_label}_seed{seed}.csv"
-        synth_df.to_csv(os.path.join(synth_output_dir, fname), index=False)
-
-    return scenario.evaluate(target_col)
-
-
-def run_synthesis_eval(
-    *,
-    csv_path: str = "",
-    scenario_name: str = "",
-    scenario_kwargs: dict | None = None,
-    synthesizer_name: str = "smote",
-    synthesizer_kwargs: dict | None = None,
+    synthesizer_kwargs: dict | None,
     target_col: str,
     n_synth_samples: int | None = None,
     n_seeds: int = 10,
     base_seed: int = 42,
-    output_csv: str | None = None,
-    scenario_data_dir: str | None = None,
-    scenario_label: str = "",
+    scenario_output_dir: str = "scenario_data",
     synth_output_dir: str | None = None,
+    output_csv: str | None = None,
 ) -> dict:
-    """合成 + 评估（multi-seed）。"""
+    """完整流程：生成场景数据 → 合成 → 评估（multi-seed）。
+
+    对每个 seed: 构建场景 → 保存场景数据 → 合成 → 保存合成数据 → 评估。
+    """
     if synthesizer_kwargs is None:
         synthesizer_kwargs = {}
     if scenario_kwargs is None:
         scenario_kwargs = {}
 
-    df_cache = None
+    df = pd.read_csv(csv_path).dropna().reset_index(drop=True)
+    synth_cls = SYNTHESIZERS.get(synthesizer_name)
+    if synth_cls is None:
+        raise ValueError(f"未知合成算法: {synthesizer_name}")
+
+    scenario_dir = os.path.join(scenario_output_dir, scenario_name)
+    save_config = SaveConfig(
+        scenario_name=scenario_name,
+        scenario_output_dir=scenario_dir,
+        scenario_label=scenario_label,
+        synth_output_dir=synth_output_dir or "",
+        synthesizer_name=synthesizer_name,
+    )
+
     all_results = []
     for i in range(n_seeds):
         seed = base_seed + i
-        # 注入 target_col（所有场景构造函数均接受该参数）
-        scenario_kwargs = {**scenario_kwargs, "target_col": target_col}
-        scenario = ScenarioFactory.create(scenario_name, seed=seed, **scenario_kwargs)
-
-        if scenario_data_dir:
-            # 从预生成数据加载
-            if not scenario_label:
-                raise ValueError("--scenario-label 不能为空（使用预生成场景数据时必填）")
-            base = os.path.normpath(scenario_data_dir)
-            train = pd.read_csv(os.path.join(base, f"train_{scenario_label}_seed{seed}.csv"))
-            test = pd.read_csv(os.path.join(base, f"test_{scenario_label}_seed{seed}.csv"))
-            scenario.set_data(train, test)
-            clean_path = os.path.join(base, f"clean_train_{scenario_label}_seed{seed}.csv")
-            if os.path.exists(clean_path):
-                scenario.clean_train = pd.read_csv(clean_path)
-        else:
-            if df_cache is None:
-                df_cache = pd.read_csv(csv_path).dropna().reset_index(drop=True)
-            scenario.build(df_cache)
-
-        res = run_single_seed(
-            seed=seed, scenario=scenario, synthesizer_name=synthesizer_name,
-            synthesizer_kwargs=synthesizer_kwargs, target_col=target_col,
-            n_synth_samples=n_synth_samples, scenario_label=scenario_label,
-            synth_output_dir=synth_output_dir, scenario_name=scenario_name,
+        scenario = ScenarioFactory.create(
+            scenario_name, seed=seed,
+            **{**scenario_kwargs, "target_col": target_col, "save_config": save_config},
         )
-        all_results.append(res)
+
+        # 1. 场景数据生成（场景内部处理存在检测 + 保存）
+        scenario.build(df)
+
+        # 2. 合成（场景内部处理存在检测 + 保存）
+        kwargs = _resolve_seed_kwargs(synthesizer_kwargs, seed, scenario_label)
+        scenario.synthesize(synth_cls, kwargs, n_synth_samples)
+
+        # 3. 评估
+        results = scenario.evaluate(target_col)
+        all_results.append(results)
 
     aggregated = aggregate_results(all_results)
     if output_csv:
@@ -249,28 +177,23 @@ def _print_results(result: dict) -> None:
 # ===========================================================================
 
 def _parse_args():
-    p = argparse.ArgumentParser(description="ReTabSyn 全流程流水线")
+    p = argparse.ArgumentParser(description="ReTabSyn 全流程流水线（生成-合成-评估）")
 
-    p.add_argument("--stages", default="1,2,3",
-                   help="运行的阶段，逗号分隔: 1=场景生成, 2=合成, 3=评估。默认全部")
-
-    p.add_argument("--csv", help="原始 CSV 路径（阶段1需要）")
-    p.add_argument("--scenario", help="场景名")
+    p.add_argument("--csv", required=True, help="原始 CSV 路径")
+    p.add_argument("--scenario", required=True, help="场景名")
+    p.add_argument("--scenario-label", default="", help="场景配置标签（用于文件名）")
     p.add_argument("--scenario-kwargs", type=str, default="{}", help="场景构造参数 JSON")
-    p.add_argument("--scenarios", type=str, default=None, help="多场景配置 JSON（阶段1批量）")
 
     p.add_argument("--synthesizer", default="smote", choices=list(SYNTHESIZERS.keys()))
     p.add_argument("--synth-kwargs", type=str, default="{}", help="合成器参数 JSON")
     p.add_argument("--n-synth", type=int, default=None, help="合成样本数")
 
     p.add_argument("--target", required=True, help="目标列名")
-    p.add_argument("--scenario-data-dir", default=None, help="预生成场景数据目录")
-    p.add_argument("--scenario-label", default="", help="场景配置标签")
 
+    p.add_argument("--scenario-output-dir", default="scenario_data", help="场景数据输出目录")
+    p.add_argument("--synth-output-dir", default=None, help="合成数据输出目录")
     p.add_argument("--output", default=None, help="评估结果 CSV 输出路径")
-    p.add_argument("--synth-output-dir", default=None, help="合成数据 CSV 输出目录")
 
-    p.add_argument("--output-dir", default="scenario_data", help="场景数据输出目录")
     p.add_argument("--n-seeds", type=int, default=10)
     p.add_argument("--base-seed", type=int, default=42)
     return p.parse_args()
@@ -289,43 +212,24 @@ def _load_synth_config(synthesizer: str, synth_kwargs_str: str) -> dict:
 
 def main():
     args = _parse_args()
-    stages = set(int(s) for s in args.stages.split(","))
-
     synth_kwargs = _load_synth_config(args.synthesizer, args.synth_kwargs)
 
-    # Stage 1: 场景数据生成
-    if 1 in stages:
-        if not args.csv or not args.scenario:
-            print("错误: 阶段1需要 --csv 和 --scenario")
-            sys.exit(1)
-        if args.scenarios:
-            scenarios = json.loads(args.scenarios)
-        else:
-            label = args.scenario_label or "default"
-            scenarios = {args.scenario: [[label, json.loads(args.scenario_kwargs)]]}
-        generate_scenario_data(
-            csv_path=args.csv, target_col=args.target, scenarios=scenarios,
-            output_dir=args.output_dir, base_seed=args.base_seed, n_seeds=args.n_seeds,
-        )
-
-    # Stage 2+3: 合成 + 评估
-    if 2 in stages or 3 in stages:
-        aggregated = run_synthesis_eval(
-            csv_path=args.csv or "",
-            scenario_name=args.scenario or "",
-            scenario_kwargs=json.loads(args.scenario_kwargs),
-            synthesizer_name=args.synthesizer,
-            synthesizer_kwargs=synth_kwargs,
-            target_col=args.target,
-            n_synth_samples=args.n_synth,
-            n_seeds=args.n_seeds,
-            base_seed=args.base_seed,
-            output_csv=args.output,
-            scenario_data_dir=args.scenario_data_dir,
-            scenario_label=args.scenario_label,
-            synth_output_dir=args.synth_output_dir,
-        )
-        _print_results(aggregated)
+    aggregated = run_pipeline(
+        csv_path=args.csv,
+        scenario_name=args.scenario,
+        scenario_label=args.scenario_label,
+        scenario_kwargs=json.loads(args.scenario_kwargs),
+        synthesizer_name=args.synthesizer,
+        synthesizer_kwargs=synth_kwargs,
+        target_col=args.target,
+        n_synth_samples=args.n_synth,
+        n_seeds=args.n_seeds,
+        base_seed=args.base_seed,
+        scenario_output_dir=args.scenario_output_dir,
+        synth_output_dir=args.synth_output_dir,
+        output_csv=args.output,
+    )
+    _print_results(aggregated)
 
 
 if __name__ == "__main__":

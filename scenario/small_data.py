@@ -17,9 +17,10 @@ class SmallDataScenario(BaseScenario):
         target_col: str,
         n_samples: int = 64,
         balance_mode: str = "raw",
-        seed: int = 42
+        seed: int = 42,
+        save_config=None,
     ):
-        super().__init__(seed=seed)
+        super().__init__(seed=seed, save_config=save_config)
         self.target_col = target_col
         self.n_samples = n_samples
         self.balance_mode = balance_mode

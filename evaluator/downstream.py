@@ -82,7 +82,6 @@ class DownstreamEvaluator(BaseEvaluator):
         models = {
             "LR": LogisticRegression(max_iter=2000, random_state=seed),
             "NB": GaussianNB(),
-            "DT": DecisionTreeClassifier(random_state=seed),
             "RF": RandomForestClassifier(n_estimators=100, random_state=seed, n_jobs=-1),
             "XGB": XGBClassifier(n_estimators=100, eval_metric="logloss", random_state=seed, verbosity=0),
         }

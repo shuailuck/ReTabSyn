@@ -11,8 +11,8 @@ class DistributionShiftScenario(BaseScenario):
 
     def __init__(self, split_col: str, seed: int = 42,
                  n_train: int | None = None, n_test: int | None = None,
-                 target_col: str | None = None):
-        super().__init__(seed=seed)
+                 target_col: str | None = None, save_config=None):
+        super().__init__(seed=seed, save_config=save_config)
         self.split_col = split_col
         self.n_train = n_train
         self.n_test = n_test

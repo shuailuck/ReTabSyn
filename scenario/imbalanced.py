@@ -11,8 +11,8 @@ from scenario.scenario import BaseScenario
 class ImbalancedDataScenario(BaseScenario):
     """Imbalanced Data 场景：将少数类下采样至指定流行率/患病率 (如 1%)"""
 
-    def __init__(self, target_col: str, minority_prev: float = 0.01, seed: int = 42):
-        super().__init__(seed=seed)
+    def __init__(self, target_col: str, minority_prev: float = 0.01, seed: int = 42, save_config=None):
+        super().__init__(seed=seed, save_config=save_config)
         self.target_col = target_col
         self.minority_prev = minority_prev
 

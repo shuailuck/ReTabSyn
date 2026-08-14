@@ -14,8 +14,8 @@ from scenario.scenario import BaseScenario
 class NoisyLabelScenario(BaseScenario):
     """Noisy Label 场景：训练集标签按 noise_ratio 概率翻转。"""
 
-    def __init__(self, target_col: str, noise_ratio: float = 0.1, seed: int = 42):
-        super().__init__(seed=seed)
+    def __init__(self, target_col: str, noise_ratio: float = 0.1, seed: int = 42, save_config=None):
+        super().__init__(seed=seed, save_config=save_config)
         self.target_col = target_col
         self.noise_ratio = noise_ratio
         self.clean_train: pd.DataFrame | None = None
