@@ -2,11 +2,17 @@
 #
 # ReTabSyn 全流程批量实验脚本
 #
-# 每个场景: 先生成数据，再遍历算法验证。
+# 三阶段: 1=场景生成, 2=合成, 3=评估
+# 通过 RUN_STAGE_* 控制运行哪些阶段
 #
 
 set -e
 
+# ── 阶段开关 ──────────────────────────────────────────
+RUN_STAGE1=1   # 1=生成场景数据, 0=跳过（使用已有 scenario_data）
+RUN_STAGE23=1  # 1=合成+评估, 0=跳过
+
+# ── 全局配置 ──────────────────────────────────────────
 CSV="csv/example/wilt.csv"
 TARGET="class"
 N_SEEDS=10
@@ -18,112 +24,92 @@ SYNTH_DIR="synth_data"
 SYNTH_ALGOS=(
     "smote"
     "tvae"
-    # "great"      # 启用 retabsyn 前先启用 great（GReaT 训练→存模型，retabsyn 加载→DPO）
+    # "great"
     # "retabsyn"
     # "pta"
+    # "cart"
     # "cartgenir"
 )
 
 SMALL_NS=(32 64 128 256)
 IMBALANCED_PREVS=(0.01 0.05 0.10)
+NOISY_RATIOS=(0.1 0.2 0.3 0.4)
 
 mkdir -p "$RESULTS_DIR" "$SCENARIO_DIR" "$SYNTH_DIR"
 
 echo "=========================================="
-echo "  ReTabSyn Pipeline - Batch Experiments"
-echo "  CSV: $CSV"
-echo "  Target: $TARGET"
+echo "  ReTabSyn Pipeline"
+echo "  CSV: $CSV  |  Target: $TARGET"
 echo "  Seeds: $N_SEEDS x (base=$BASE_SEED)"
+echo "  Stages: 1=$RUN_STAGE1, 2+3=$RUN_STAGE23"
 echo "  Algorithms: ${SYNTH_ALGOS[*]}"
 echo "=========================================="
 
 # ====================================================================
-# Small Data 场景
+# Stage 1: 场景数据生成
 # ====================================================================
-echo ""
-echo "========== Small Data =========="
+if [ "$RUN_STAGE1" -eq 1 ]; then
+    echo ""
+    echo "========== Stage 1: Scenario Generation =========="
 
-for N in "${SMALL_NS[@]}"; do
-    LABEL="n${N}"
-    KWARGS="{\"target_col\": \"$TARGET\", \"n_samples\": $N}"
-
-    # 生成场景数据
-    python generate_scenario_data.py \
-        --csv "$CSV" --target "$TARGET" \
-        --scenarios "{\"small\": [[\"$LABEL\", $KWARGS]]}" \
-        --output-dir "$SCENARIO_DIR" --base-seed "$BASE_SEED" --n-seeds "$N_SEEDS"
-
-    # 各算法
-    for ALGO in "${SYNTH_ALGOS[@]}"; do
-        echo ""
-        echo ">>> small/$LABEL | $ALGO"
-        python run_pipeline.py \
-            --scenario-data-dir "$SCENARIO_DIR/small" --scenario-label "$LABEL" \
-            --target "$TARGET" --synthesizer "$ALGO" \
-            --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
-            --output "$RESULTS_DIR/small_${ALGO}_${LABEL}.csv" \
-            --synth-output-dir "$SYNTH_DIR"
+    # Small Data
+    for N in "${SMALL_NS[@]}"; do
+        python pipeline.py --stages 1 \
+            --csv "$CSV" --scenario small --scenario-label "n${N}" \
+            --scenario-kwargs "{\"target_col\": \"$TARGET\", \"n_samples\": $N}" \
+            --target "$TARGET" --output-dir "$SCENARIO_DIR" \
+            --base-seed "$BASE_SEED" --n-seeds "$N_SEEDS"
     done
-done
 
-# ====================================================================
-# Imbalanced 场景
-# ====================================================================
-echo ""
-echo "========== Imbalanced =========="
-
-for PREV in "${IMBALANCED_PREVS[@]}"; do
-    LABEL="prev$(echo "$PREV" | sed 's/0\.//')"
-    KWARGS="{\"target_col\": \"$TARGET\", \"minority_prev\": $PREV}"
-
-    # 生成场景数据
-    python generate_scenario_data.py \
-        --csv "$CSV" --target "$TARGET" \
-        --scenarios "{\"imbalanced\": [[\"$LABEL\", $KWARGS]]}" \
-        --output-dir "$SCENARIO_DIR" --base-seed "$BASE_SEED" --n-seeds "$N_SEEDS"
-
-    # 各算法
-    for ALGO in "${SYNTH_ALGOS[@]}"; do
-        echo ""
-        echo ">>> imbalanced/$LABEL | $ALGO"
-        python run_pipeline.py \
-            --scenario-data-dir "$SCENARIO_DIR/imbalanced" --scenario-label "$LABEL" \
-            --target "$TARGET" --synthesizer "$ALGO" \
-            --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
-            --output "$RESULTS_DIR/imbalanced_${ALGO}_${LABEL}.csv" \
-            --synth-output-dir "$SYNTH_DIR"
+    # Imbalanced
+    for PREV in "${IMBALANCED_PREVS[@]}"; do
+        LABEL="prev$(echo "$PREV" | sed 's/0\.//')"
+        python pipeline.py --stages 1 \
+            --csv "$CSV" --scenario imbalanced --scenario-label "$LABEL" \
+            --scenario-kwargs "{\"target_col\": \"$TARGET\", \"minority_prev\": $PREV}" \
+            --target "$TARGET" --output-dir "$SCENARIO_DIR" \
+            --base-seed "$BASE_SEED" --n-seeds "$N_SEEDS"
     done
-done
+
+    # Noisy Label
+    for RATIO in "${NOISY_RATIOS[@]}"; do
+        LABEL="nr$(awk "BEGIN{printf \"%.0f\", $RATIO*100}")"
+        python pipeline.py --stages 1 \
+            --csv "$CSV" --scenario noisy_label --scenario-label "$LABEL" \
+            --scenario-kwargs "{\"target_col\": \"$TARGET\", \"noise_ratio\": $RATIO}" \
+            --target "$TARGET" --output-dir "$SCENARIO_DIR" \
+            --base-seed "$BASE_SEED" --n-seeds "$N_SEEDS"
+    done
+fi
 
 # ====================================================================
-# Distribution Shift 场景 (需要含 split_col 的数据集，例如 wilt 的 "class")
+# Stage 2+3: 合成 + 评估
 # ====================================================================
-# echo ""
-# echo "========== Distribution Shift =========="
-#
-# SPLIT_COL="class"
-# SHIFT_NS=(32 64 128 256 512)
-#
-# for N in "${SHIFT_NS[@]}"; do
-#     LABEL="n${N}"
-#     KWARGS="{\"split_col\": \"$SPLIT_COL\", \"target_col\": \"$TARGET\", \"n_train\": $N, \"n_test\": $N}"
-#
-#     python generate_scenario_data.py \
-#         --csv "$CSV" --target "$TARGET" \
-#         --scenarios "{\"shift\": [[\"$LABEL\", $KWARGS]]}" \
-#         --output-dir "$SCENARIO_DIR" --base-seed "$BASE_SEED" --n-seeds "$N_SEEDS"
-#
-#     for ALGO in "${SYNTH_ALGOS[@]}"; do
-#         echo ""
-#         echo ">>> shift/$LABEL | $ALGO"
-#         python run_pipeline.py \
-#             --scenario-data-dir "$SCENARIO_DIR/shift" --scenario-label "$LABEL" \
-#             --target "$TARGET" --synthesizer "$ALGO" \
-#             --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
-#             --output "$RESULTS_DIR/shift_${ALGO}_${LABEL}.csv" \
-#             --synth-output-dir "$SYNTH_DIR"
-#     done
-# done
+if [ "$RUN_STAGE23" -eq 1 ]; then
+    echo ""
+    echo "========== Stage 2+3: Synthesis + Evaluation =========="
+
+    # 遍历所有已生成的场景目录
+    for SCENARIO_DIR_ENTRY in "$SCENARIO_DIR"/*/; do
+        SCENARIO_NAME=$(basename "$SCENARIO_DIR_ENTRY")
+        # 从目录中提取所有 label
+        LABELS=$(ls "$SCENARIO_DIR_ENTRY" | grep '^train_' | sed -E 's/^train_([^_]+)_seed[0-9]+\.csv$/\1/' | sort -u)
+
+        for LABEL in $LABELS; do
+            for ALGO in "${SYNTH_ALGOS[@]}"; do
+                echo ""
+                echo ">>> $SCENARIO_NAME/$LABEL | $ALGO"
+                python pipeline.py --stages 2,3 \
+                    --scenario-data-dir "$SCENARIO_DIR/$SCENARIO_NAME" \
+                    --scenario-label "$LABEL" --scenario "$SCENARIO_NAME" \
+                    --target "$TARGET" --synthesizer "$ALGO" \
+                    --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
+                    --output "$RESULTS_DIR/${SCENARIO_NAME}_${ALGO}_${LABEL}.csv" \
+                    --synth-output-dir "$SYNTH_DIR"
+            done
+        done
+    done
+fi
 
 echo ""
 echo "Done."

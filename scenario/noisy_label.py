@@ -36,6 +36,9 @@ class NoisyLabelScenario(BaseScenario):
         train_df = full_train.copy().reset_index(drop=True)
         test_df = full_test.copy().reset_index(drop=True)
 
+        # 保存未加噪的干净训练集
+        self.clean_train = train_df.copy()
+
         # 对训练集标签加噪
         train_df = self._flip_labels(train_df)
 

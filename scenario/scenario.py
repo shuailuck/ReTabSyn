@@ -25,6 +25,12 @@ class BaseScenario(ABC):
         """
         pass
 
+    @property
+    def evaluator(self):
+        """该场景对应的评估器。子类可覆盖以使用不同评估逻辑。"""
+        from evaluator.downstream import DownstreamEvaluator
+        return DownstreamEvaluator()
+
     @staticmethod
     def _subsample(df: pd.DataFrame, n: int, seed: int, target_col: str | None = None) -> pd.DataFrame:
         """公共辅助工具：安全无放回随机/分层子采样"""
