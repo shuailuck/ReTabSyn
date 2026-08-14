@@ -18,7 +18,7 @@ class DistributionShiftScenario(BaseScenario):
         self.n_test = n_test
         self.target_col = target_col
 
-    def build(self, df: pd.DataFrame, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def _build(self, df: pd.DataFrame, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
         if self.split_col not in df.columns:
             raise ValueError(f"划分列 '{self.split_col}' 不存在于数据中。")
 

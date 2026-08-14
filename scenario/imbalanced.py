@@ -43,7 +43,7 @@ class ImbalancedDataScenario(BaseScenario):
             .reset_index(drop=True)
         )
 
-    def build(self, df: pd.DataFrame, full_test: pd.DataFrame | None = None, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def _build(self, df: pd.DataFrame, full_test: pd.DataFrame | None = None, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
         """在 Train 和 Test 中同步将少数类下采样至指定比例"""
         if full_test is None:
             full_train, full_test = train_test_split(

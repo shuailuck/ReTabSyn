@@ -24,7 +24,7 @@ class SmallDataScenario(BaseScenario):
         self.n_samples = n_samples
         self.balance_mode = balance_mode
 
-    def build(self, df: pd.DataFrame, full_test: pd.DataFrame | None = None, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def _build(self, df: pd.DataFrame, full_test: pd.DataFrame | None = None, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
         # 1. 基础 80/20 切分 (若未传入外部独立 test 集)
         if full_test is None:
             stratify = df[self.target_col] if self.target_col in df.columns else None

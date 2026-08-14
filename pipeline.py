@@ -1,12 +1,8 @@
 """
 pipeline.py: ReTabSyn 全流程流水线。
 
-三阶段:
-  1. 场景数据生成 (scenario data generation)
-  2. 数据合成 (synthesis)
-  3. 下游评估 (evaluation)
-
-通过 --stages 控制运行哪些阶段。
+三阶段: 1=场景生成, 2=合成, 3=评估。
+对每个 seed 执行: 场景数据生成 → 合成 → 评估（由 scenario 内部编排）。
 """
 
 from __future__ import annotations
@@ -65,11 +61,21 @@ def generate_scenario_data(
             for i in range(n_seeds):
                 seed = base_seed + i
                 scenario = ScenarioFactory.create(scenario_name, seed=seed, **kwargs)
-                train_df, test_df = scenario.build(df)
+                scenario.build(df)
 
-                train_df.to_csv(os.path.join(scenario_dir, f"train_{label}_seed{seed}.csv"), index=False)
-                test_df.to_csv(os.path.join(scenario_dir, f"test_{label}_seed{seed}.csv"), index=False)
-                print(f"[generate] {scenario_name}/{label}/seed{seed} train={train_df.shape} test={test_df.shape}")
+                scenario.train_df.to_csv(
+                    os.path.join(scenario_dir, f"train_{label}_seed{seed}.csv"), index=False)
+                scenario.test_df.to_csv(
+                    os.path.join(scenario_dir, f"test_{label}_seed{seed}.csv"), index=False)
+
+                # 场景附加数据（如 NoisyLabel 的 clean_train）
+                clean_train = getattr(scenario, "clean_train", None)
+                if clean_train is not None:
+                    clean_train.to_csv(
+                        os.path.join(scenario_dir, f"clean_train_{label}_seed{seed}.csv"), index=False)
+
+                print(f"[generate] {scenario_name}/{label}/seed{seed} "
+                      f"train={scenario.train_df.shape} test={scenario.test_df.shape}")
 
 
 # ===========================================================================
@@ -88,9 +94,7 @@ def _resolve_seed_kwargs(kwargs: dict, seed: int, label: str = "") -> dict:
 def run_single_seed(
     *,
     seed: int,
-    real_train: pd.DataFrame,
-    real_test: pd.DataFrame,
-    scenario: object,           # BaseScenario 实例（用于获取 evaluator）
+    scenario,
     synthesizer_name: str,
     synthesizer_kwargs: dict,
     target_col: str,
@@ -104,55 +108,15 @@ def run_single_seed(
     if synth_cls is None:
         raise ValueError(f"未知合成算法: {synthesizer_name}")
 
-    synth = synth_cls(random_state=seed, **_resolve_seed_kwargs(synthesizer_kwargs, seed, scenario_label))
-    synth.fit(real_train)
-    n_samples = n_synth_samples if n_synth_samples is not None else len(real_train)
-    synth_df = synth.sample(n_samples=n_samples)
+    kwargs = _resolve_seed_kwargs(synthesizer_kwargs, seed, scenario_label)
+    synth_df = scenario.synthesize(synth_cls, kwargs, n_synth_samples)
 
     if synth_output_dir and scenario_label:
         os.makedirs(synth_output_dir, exist_ok=True)
         fname = f"{scenario_name}_{synthesizer_name}_{scenario_label}_seed{seed}.csv"
         synth_df.to_csv(os.path.join(synth_output_dir, fname), index=False)
 
-    # 用场景对应的 evaluator 评估
-    evaluator = scenario.evaluator if scenario is not None else None
-    if evaluator is None:
-        from evaluator.downstream import DownstreamEvaluator
-        evaluator = DownstreamEvaluator()
-
-    return evaluator.evaluate(
-        real_train=real_train,
-        real_test=real_test,
-        synth_df=synth_df,
-        target_col=target_col,
-        seed=seed,
-    )
-
-
-def _load_or_build_scenario(
-    *,
-    seed: int,
-    csv_path: str,
-    scenario_name: str,
-    scenario_kwargs: dict,
-    scenario_data_dir: str | None,
-    scenario_label: str,
-    df_cache: pd.DataFrame | None,
-):
-    """加载预生成数据，或现场构建场景。返回 (scenario, real_train, real_test)。"""
-    if scenario_data_dir:
-        if not scenario_label:
-            raise ValueError("--scenario-label 不能为空（使用预生成场景数据时必填）")
-        base = os.path.normpath(scenario_data_dir)
-        real_train = pd.read_csv(os.path.join(base, f"train_{scenario_label}_seed{seed}.csv"))
-        real_test = pd.read_csv(os.path.join(base, f"test_{scenario_label}_seed{seed}.csv"))
-        return None, real_train, real_test
-
-    if df_cache is None:
-        df_cache = pd.read_csv(csv_path).dropna().reset_index(drop=True)
-    scenario = ScenarioFactory.create(scenario_name, seed=seed, **scenario_kwargs)
-    real_train, real_test = scenario.build(df_cache)
-    return scenario, real_train, real_test
+    return scenario.evaluate(target_col)
 
 
 def run_synthesis_eval(
@@ -181,14 +145,28 @@ def run_synthesis_eval(
     all_results = []
     for i in range(n_seeds):
         seed = base_seed + i
-        scenario, real_train, real_test = _load_or_build_scenario(
-            seed=seed, csv_path=csv_path, scenario_name=scenario_name,
-            scenario_kwargs=scenario_kwargs, scenario_data_dir=scenario_data_dir,
-            scenario_label=scenario_label, df_cache=df_cache,
-        )
+        # 注入 target_col（所有场景构造函数均接受该参数）
+        scenario_kwargs = {**scenario_kwargs, "target_col": target_col}
+        scenario = ScenarioFactory.create(scenario_name, seed=seed, **scenario_kwargs)
+
+        if scenario_data_dir:
+            # 从预生成数据加载
+            if not scenario_label:
+                raise ValueError("--scenario-label 不能为空（使用预生成场景数据时必填）")
+            base = os.path.normpath(scenario_data_dir)
+            train = pd.read_csv(os.path.join(base, f"train_{scenario_label}_seed{seed}.csv"))
+            test = pd.read_csv(os.path.join(base, f"test_{scenario_label}_seed{seed}.csv"))
+            scenario.set_data(train, test)
+            clean_path = os.path.join(base, f"clean_train_{scenario_label}_seed{seed}.csv")
+            if os.path.exists(clean_path):
+                scenario.clean_train = pd.read_csv(clean_path)
+        else:
+            if df_cache is None:
+                df_cache = pd.read_csv(csv_path).dropna().reset_index(drop=True)
+            scenario.build(df_cache)
+
         res = run_single_seed(
-            seed=seed, real_train=real_train, real_test=real_test,
-            scenario=scenario, synthesizer_name=synthesizer_name,
+            seed=seed, scenario=scenario, synthesizer_name=synthesizer_name,
             synthesizer_kwargs=synthesizer_kwargs, target_col=target_col,
             n_synth_samples=n_synth_samples, scenario_label=scenario_label,
             synth_output_dir=synth_output_dir, scenario_name=scenario_name,
@@ -260,8 +238,8 @@ def _print_results(result: dict) -> None:
     print(f"\n{'=' * 40}")
     print(f"  {'Mode':<14} {'Mean':>8} {'SE':>8}")
     print(f"  {'-' * 32}")
-    for mode in ["real", "synthetic", "augment"]:
-        if mode in result and "Average" in result[mode]:
+    for mode in result:
+        if "Average" in result[mode]:
             mean, se = result[mode]["Average"]
             print(f"  {mode:<14} {mean:>8.4f} {se:>8.4f}")
 
@@ -276,35 +254,25 @@ def _parse_args():
     p.add_argument("--stages", default="1,2,3",
                    help="运行的阶段，逗号分隔: 1=场景生成, 2=合成, 3=评估。默认全部")
 
-    # Stage 1 参数
     p.add_argument("--csv", help="原始 CSV 路径（阶段1需要）")
-    p.add_argument("--scenario", help="场景名（阶段1需要）")
-    p.add_argument("--scenario-kwargs", type=str, default="{}",
-                   help="场景构造参数 JSON")
-    p.add_argument("--scenarios", type=str, default=None,
-                   help="多场景配置 JSON（阶段1批量模式）")
+    p.add_argument("--scenario", help="场景名")
+    p.add_argument("--scenario-kwargs", type=str, default="{}", help="场景构造参数 JSON")
+    p.add_argument("--scenarios", type=str, default=None, help="多场景配置 JSON（阶段1批量）")
 
-    # Stage 2 参数
-    p.add_argument("--synthesizer", default="smote",
-                   choices=list(SYNTHESIZERS.keys()), help="合成算法")
-    p.add_argument("--synth-kwargs", type=str, default="{}",
-                   help="合成器参数 JSON（覆盖 configs 中的值）")
+    p.add_argument("--synthesizer", default="smote", choices=list(SYNTHESIZERS.keys()))
+    p.add_argument("--synth-kwargs", type=str, default="{}", help="合成器参数 JSON")
     p.add_argument("--n-synth", type=int, default=None, help="合成样本数")
 
-    # Stage 2+3 共用
     p.add_argument("--target", required=True, help="目标列名")
     p.add_argument("--scenario-data-dir", default=None, help="预生成场景数据目录")
     p.add_argument("--scenario-label", default="", help="场景配置标签")
 
-    # Stage 3 参数
     p.add_argument("--output", default=None, help="评估结果 CSV 输出路径")
     p.add_argument("--synth-output-dir", default=None, help="合成数据 CSV 输出目录")
 
-    # 通用
     p.add_argument("--output-dir", default="scenario_data", help="场景数据输出目录")
     p.add_argument("--n-seeds", type=int, default=10)
     p.add_argument("--base-seed", type=int, default=42)
-    p.add_argument("--metric", default="auroc", choices=["auroc", "prauc"])
     return p.parse_args()
 
 

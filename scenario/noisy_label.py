@@ -1,8 +1,8 @@
 """
-scenarios/noisy_label.py: Noisy Label 场景构建。
+scenario/noisy_label.py: Noisy Label 场景。
 
-训练集的标签以一定概率被翻转到其他类别，测试集保持干净。
-主要用于分类任务，噪声比例由 noise_ratio 超参控制。
+训练集标签按 noise_ratio 概率翻转，测试集保持干净。
+场景额外维护 clean_train（未加噪训练集），用于评估噪声带来的性能损失上界。
 """
 
 import numpy as np
@@ -18,13 +18,13 @@ class NoisyLabelScenario(BaseScenario):
         super().__init__(seed=seed)
         self.target_col = target_col
         self.noise_ratio = noise_ratio
+        self.clean_train: pd.DataFrame | None = None
 
-    def build(self, df: pd.DataFrame, full_test: pd.DataFrame | None = None,
-              **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def _build(self, df: pd.DataFrame, full_test: pd.DataFrame | None = None,
+               **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
         if self.target_col not in df.columns:
             raise ValueError(f"目标列 '{self.target_col}' 不存在于数据中。")
 
-        # 基础切分
         if full_test is None:
             stratify = df[self.target_col]
             full_train, full_test = train_test_split(
@@ -43,6 +43,17 @@ class NoisyLabelScenario(BaseScenario):
         train_df = self._flip_labels(train_df)
 
         return train_df, test_df
+
+    def evaluate(self, target_col: str) -> dict:
+        """在标准评估基础上，追加 clean baseline。"""
+        results = super().evaluate(target_col)
+
+        if self.clean_train is not None:
+            results["clean"] = self.evaluator.evaluate(
+                train_df=self.clean_train, test_df=self.test_df,
+                target_col=target_col, seed=self.seed,
+            )
+        return results
 
     def _flip_labels(self, df: pd.DataFrame) -> pd.DataFrame:
         """按 noise_ratio 概率翻转训练集标签。"""
