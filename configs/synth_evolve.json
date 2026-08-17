@@ -1,0 +1,14 @@
+{
+    "synthesizer": "evolve",
+    "synth_kwargs": {
+        "p": 0.05,
+        "T": 10,
+        "tau": 0.5,
+        "delta": 0.3,
+        "K": 5,
+        "epsilon": 0.05,
+        "latent_dim": 8,
+        "hidden_dim": 64,
+        "boundary_ratio": 1.0
+    }
+}

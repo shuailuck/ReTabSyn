@@ -22,6 +22,7 @@ from synthesis.tvae_synthesizer import TVAESynthesizer
 from synthesis.retabsyn_synthesizer import ReTabSynSynthesizer
 from synthesis.cartgenir_synthesizer import CARTGenIRSynthesizer
 from synthesis.cart_synthesizer import CARTSynthesizer
+from synthesis.evolve_synthesizer import EvolveSynthesizer
 
 SYNTHESIZERS = {
     "smote": SmoteSynthesizer,
@@ -31,6 +32,7 @@ SYNTHESIZERS = {
     "retabsyn": ReTabSynSynthesizer,
     "cart": CARTSynthesizer,
     "cartgenir": CARTGenIRSynthesizer,
+    "evolve": EvolveSynthesizer,
 }
 
 

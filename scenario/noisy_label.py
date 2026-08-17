@@ -56,20 +56,25 @@ class NoisyLabelScenario(BaseScenario):
         return results
 
     def _flip_labels(self, df: pd.DataFrame) -> pd.DataFrame:
-        """按 noise_ratio 概率翻转训练集标签。"""
+        """按 noise_ratio 概率翻转训练集标签，并标记 is_noise 列。
+
+        is_noise: 1=标签被翻转（噪声），0=标签未翻转（干净）。
+        """
         y = df[self.target_col]
         classes = np.unique(y)
-        if len(classes) < 2:
-            return df  # 单类别无法翻转
+        is_noise = np.zeros(len(df), dtype=int)
 
-        rng = np.random.RandomState(self.seed)
-        n_flip = int(len(df) * self.noise_ratio)
-        flip_indices = rng.choice(len(df), size=n_flip, replace=False)
+        if len(classes) >= 2:
+            rng = np.random.RandomState(self.seed)
+            n_flip = int(len(df) * self.noise_ratio)
+            flip_indices = rng.choice(len(df), size=n_flip, replace=False)
 
-        for idx in flip_indices:
-            current = y.iloc[idx]
-            other_classes = [c for c in classes if c != current]
-            new_label = rng.choice(other_classes)
-            df.loc[idx, self.target_col] = new_label
+            for idx in flip_indices:
+                current = y.iloc[idx]
+                other_classes = [c for c in classes if c != current]
+                new_label = rng.choice(other_classes)
+                df.loc[idx, self.target_col] = new_label
+                is_noise[idx] = 1
 
+        df["is_noise"] = is_noise
         return df
