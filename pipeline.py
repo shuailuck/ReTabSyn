@@ -22,7 +22,6 @@ from synthesis.tvae_synthesizer import TVAESynthesizer
 from synthesis.retabsyn_synthesizer import ReTabSynSynthesizer
 from synthesis.cartgenir_synthesizer import CARTGenIRSynthesizer
 from synthesis.cart_synthesizer import CARTSynthesizer
-from synthesis.evolve_synthesizer import EvolveSynthesizer
 
 SYNTHESIZERS = {
     "smote": SmoteSynthesizer,
@@ -32,7 +31,6 @@ SYNTHESIZERS = {
     "retabsyn": ReTabSynSynthesizer,
     "cart": CARTSynthesizer,
     "cartgenir": CARTGenIRSynthesizer,
-    "evolve": EvolveSynthesizer,
 }
 
 
@@ -71,8 +69,10 @@ def run_pipeline(
         scenario_kwargs = {}
 
     df = pd.read_csv(csv_path).dropna().reset_index(drop=True)
+
+    # Evolve 是独立流程（非通用合成器），synth_cls 为 None
     synth_cls = SYNTHESIZERS.get(synthesizer_name)
-    if synth_cls is None:
+    if synth_cls is None and synthesizer_name != "evolve":
         raise ValueError(f"未知合成算法: {synthesizer_name}")
 
     scenario_dir = os.path.join(scenario_output_dir, scenario_name)
@@ -87,17 +87,20 @@ def run_pipeline(
     all_results = []
     for i in range(n_seeds):
         seed = base_seed + i
+
+        # augment_method 帮助工厂选择场景变体（如 noisy_label + evolve）
         scenario = ScenarioFactory.create(
             scenario_name, seed=seed,
+            augment_method=synthesizer_name,
             **{**scenario_kwargs, "target_col": target_col, "save_config": save_config},
         )
 
         # 1. 场景数据生成（场景内部处理存在检测 + 保存）
         scenario.build(df)
 
-        # 2. 合成（场景内部处理存在检测 + 保存）
+        # 2. 增强（Evolve 场景内部运行闭环）
         kwargs = _resolve_seed_kwargs(synthesizer_kwargs, seed, scenario_label)
-        scenario.synthesize(synth_cls, kwargs, n_synth_samples)
+        scenario.augment(synth_cls, kwargs, n_synth_samples)
 
         # 3. 评估
         results = scenario.evaluate(target_col)
@@ -186,7 +189,7 @@ def _parse_args():
     p.add_argument("--scenario-label", default="", help="场景配置标签（用于文件名）")
     p.add_argument("--scenario-kwargs", type=str, default="{}", help="场景构造参数 JSON")
 
-    p.add_argument("--synthesizer", default="smote", choices=list(SYNTHESIZERS.keys()))
+    p.add_argument("--synthesizer", default="smote", choices=list(SYNTHESIZERS.keys()) + ["evolve"])
     p.add_argument("--synth-kwargs", type=str, default="{}", help="合成器参数 JSON")
     p.add_argument("--n-synth", type=int, default=None, help="合成样本数")
 

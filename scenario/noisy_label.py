@@ -78,3 +78,34 @@ class NoisyLabelScenario(BaseScenario):
 
         df["is_noise"] = is_noise
         return df
+
+
+class EvolveNoisyLabelScenario(NoisyLabelScenario):
+    """Noisy Label 场景 + Evolve 算法。
+
+    augment() 不调用通用合成器，而是运行 Evolve 闭环，
+    将辨别器识别的干净集与生成器合成的边界数据合并。
+    """
+
+    def augment(self, synthesizer_cls=None, synthesizer_kwargs: dict | None = None,
+                n_samples: int | None = None) -> pd.DataFrame:
+        """运行 Evolve 闭环，产出干净集 + 边界合成集。
+
+        synthesizer_kwargs 承载 Evolve 算法参数（p, T, tau, ...）。
+        """
+        if self.train_df is None:
+            raise RuntimeError("请先调用 build() 生成训练数据")
+
+        if self._synth_data_exists():
+            self._load_synth_data()
+            print(f"[skip] 合成数据已存在: {self.save_config.synthesizer_name}/{self.save_config.scenario_label}/seed{self.seed}")
+            return self.synth_df
+
+        from evolve.algorithm import Evolve
+        evolve_kwargs = synthesizer_kwargs or {}
+        algo = Evolve(random_state=self.seed, **evolve_kwargs)
+        clean_df, boundary_df = algo.run(self.train_df, self.target_col)
+
+        self.synth_df = pd.concat([clean_df, boundary_df], ignore_index=True)
+        self._save_synth_data()
+        return self.synth_df

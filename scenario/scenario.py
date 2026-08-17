@@ -68,9 +68,9 @@ class BaseScenario(ABC):
     # 合成
     # -------------------------------------------------------------------
 
-    def synthesize(self, synthesizer_cls, synthesizer_kwargs: dict | None = None,
-                   n_samples: int | None = None) -> pd.DataFrame:
-        """合成数据。若已存在则加载，否则合成并保存。"""
+    def augment(self, synthesizer_cls, synthesizer_kwargs: dict | None = None,
+                n_samples: int | None = None) -> pd.DataFrame:
+        """增强训练数据。若已存在则加载，否则增强并保存。"""
         if self.train_df is None:
             raise RuntimeError("请先调用 build() 生成训练数据")
 
