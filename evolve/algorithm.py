@@ -94,6 +94,8 @@ class Evolve:
         latent_dim: int = 8,
         hidden_dim: int = 64,
         boundary_ratio: float = 1.0,
+        aum_lr: float = 1e-3,
+        aum_batch_size: int = 256,
         device: str | None = None,
     ):
         self.random_state = random_state
@@ -106,6 +108,8 @@ class Evolve:
         self.latent_dim = latent_dim
         self.hidden_dim = hidden_dim
         self.boundary_ratio = boundary_ratio
+        self.aum_lr = aum_lr
+        self.aum_batch_size = aum_batch_size
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
     # -------------------------------------------------------------------
@@ -131,35 +135,32 @@ class Evolve:
         # Phase 0: 伪样本植入
         y_with_pseudo, pseudo_mask = self._inject_pseudo_samples(X, y)
 
-        # 迭代
         clean_mask = np.ones(len(y), dtype=bool)
         prev_noisy = None
 
+        # Phase 1: AUM 评估（同一个 MLP 训练 T 个 epoch 后记录 margin）
+        aum, logits = self._compute_aum(X, y_with_pseudo, clean_mask)
+        threshold = self._bimodal_threshold(aum, pseudo_mask)
+        clean_mask = aum >= threshold
+        q = self._soft_distribution(logits)
+        w = self._sample_weights(aum, threshold)
+        self._report_noise_detection(0, 1, "AUM", clean_mask, pseudo_mask, threshold)
+
+        # Phase 2: 双向增强闭环（AUM + 合成器）
         for k in range(self.K):
             print(f"[Evolve] 迭代 {k + 1}/{self.K}")
 
-            # Phase 1: AUM 评估
             aum, logits = self._compute_aum(X, y_with_pseudo, clean_mask)
-            threshold = self._pseudo_threshold(aum, pseudo_mask)
+            threshold = self._bimodal_threshold(aum, pseudo_mask)
             clean_mask = aum >= threshold
             q = self._soft_distribution(logits)
             w = self._sample_weights(aum, threshold)
+            self._report_noise_detection(k, self.K, "Evolve", clean_mask, pseudo_mask, threshold)
 
-            n_noisy = (~clean_mask & ~pseudo_mask).sum()
-            print(f"  AUM 阈值={threshold:.4f}, 干净样本={clean_mask.sum()}, 噪声样本={n_noisy}")
-
-            if self._is_noise_gt is not None:
-                detected = ~clean_mask & ~pseudo_mask
-                gt = self._is_noise_gt
-                tp = (detected & gt).sum()
-                precision = tp / detected.sum() if detected.sum() > 0 else 0.0
-                recall = tp / gt.sum() if gt.sum() > 0 else 0.0
-                print(f"  [辨别器] Precision={precision:.4f}, Recall={recall:.4f}")
-
-            # Phase 2: 加权 CVAE 训练
+            # 加权 CVAE 训练
             self._train_cvae(X[clean_mask], q[clean_mask], w[clean_mask])
 
-            # Phase 5: 收敛判定
+            # 收敛判定
             if prev_noisy is not None:
                 iou = self._iou(prev_noisy, ~clean_mask & ~pseudo_mask)
                 print(f"  IoU={iou:.4f}")
@@ -230,15 +231,14 @@ class Evolve:
     # -------------------------------------------------------------------
 
     def _inject_pseudo_samples(self, X, y):
+        """伪样本植入：新增假类别（第 C+1 类），将 p% 样本强制指派到假类别。"""
         y_new = y.copy()
         n_pseudo = max(int(len(y) * self.p), 1)
         rng = np.random.RandomState(self.random_state)
         pseudo_idx = rng.choice(len(y), size=n_pseudo, replace=False)
 
-        num_classes = len(np.unique(y))
-        for idx in pseudo_idx:
-            other = [c for c in range(num_classes) if c != y[idx]]
-            y_new[idx] = rng.choice(other)
+        fake_class = self._num_classes  # 假类别索引（第 C+1 类，0-indexed）
+        y_new[pseudo_idx] = fake_class
 
         pseudo_mask = np.zeros(len(y), dtype=bool)
         pseudo_mask[pseudo_idx] = True
@@ -249,8 +249,9 @@ class Evolve:
     # -------------------------------------------------------------------
 
     def _compute_aum(self, X, y, active_mask):
-        model = MLPClassifier(X.shape[1], self._num_classes, self.hidden_dim).to(self.device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        # 多一个假类别输出单元
+        model = MLPClassifier(X.shape[1], self._num_classes + 1, self.hidden_dim).to(self.device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.aum_lr)
 
         X_tensor = torch.tensor(X, dtype=torch.float32).to(self.device)
         y_tensor = torch.tensor(y, dtype=torch.long).to(self.device)
@@ -260,14 +261,21 @@ class Evolve:
         logits_np = None
         for _ in range(self.T):
             model.train()
-            optimizer.zero_grad()
-            logits = model(X_tensor)
-            loss = F.cross_entropy(logits[active_tensor], y_tensor[active_tensor])
-            loss.backward()
-            optimizer.step()
+            # mini-batch 训练
+            perm = torch.randperm(len(X))
+            for i in range(0, len(X), self.aum_batch_size):
+                idx = perm[i:i + self.aum_batch_size]
+                batch_active = active_tensor[idx]
+                optimizer.zero_grad()
+                logits = model(X_tensor[idx])
+                loss = F.cross_entropy(logits[batch_active], y_tensor[idx][batch_active])
+                loss.backward()
+                optimizer.step()
 
+            # 记录 margin
             with torch.no_grad():
-                logits_np = logits.cpu().numpy()
+                model.eval()
+                logits_np = model(X_tensor).cpu().numpy()
                 margins += self._compute_margin(logits_np, y) / self.T
 
         return margins, logits_np
@@ -280,13 +288,45 @@ class Evolve:
             margin[i] = z_true - z_other
         return margin
 
-    def _pseudo_threshold(self, aum, pseudo_mask):
-        if pseudo_mask.sum() == 0:
-            return np.percentile(aum, 10)
-        return np.percentile(aum[pseudo_mask], 99)
+    def _bimodal_threshold(self, aum, pseudo_mask):
+        """用真实样本 AUM 分布的双峰谷底作为阈值。
+
+        排除伪样本（假类别 AUM 过负，会扭曲分布）。
+        若分布未呈现双峰，fallback 到中位数。
+        """
+        real_aum = aum[~pseudo_mask] if pseudo_mask.sum() > 0 else aum
+
+        hist, edges = np.histogram(real_aum, bins=50)
+        centers = (edges[:-1] + edges[1:]) / 2
+
+        # 平滑（移动平均）
+        kernel = np.ones(5) / 5
+        hist_smooth = np.convolve(hist, kernel, mode="same")
+
+        # 找局部峰值
+        peaks = []
+        for i in range(1, len(hist_smooth) - 1):
+            if (hist_smooth[i] >= hist_smooth[i - 1] and
+                    hist_smooth[i] >= hist_smooth[i + 1] and hist_smooth[i] > 0):
+                peaks.append(i)
+
+        if len(peaks) < 2:
+            # 无双峰，fallback 到中位数
+            return float(np.median(real_aum))
+
+        # 取两个最高峰
+        peaks.sort(key=lambda i: hist_smooth[i], reverse=True)
+        p1, p2 = sorted(peaks[:2])
+
+        # 两峰之间找谷底
+        valley_idx = p1 + int(np.argmin(hist_smooth[p1:p2 + 1]))
+
+        return float(centers[valley_idx])
 
     def _soft_distribution(self, logits):
-        return F.softmax(torch.tensor(logits / self.tau, dtype=torch.float32), dim=1).numpy()
+        # 丢弃假类别维度，只保留真实类别
+        real_logits = logits[:, :self._num_classes]
+        return F.softmax(torch.tensor(real_logits / self.tau, dtype=torch.float32), dim=1).numpy()
 
     def _sample_weights(self, aum, threshold):
         sigma = aum.std() if aum.std() > 0 else 1.0
@@ -360,3 +400,16 @@ class Evolve:
         inter = (set_a & set_b).sum()
         union = (set_a | set_b).sum()
         return inter / union if union > 0 else 0.0
+
+    def _report_noise_detection(self, round_idx, total, tag, clean_mask, pseudo_mask, threshold):
+        """报告本轮噪声辨别结果（含 ground truth 精度）。"""
+        n_noisy = (~clean_mask & ~pseudo_mask).sum()
+        print(f"[{tag} {round_idx + 1}/{total}] 阈值={threshold:.4f}, "
+              f"干净={clean_mask.sum()}, 噪声={n_noisy}")
+        if self._is_noise_gt is not None:
+            detected = ~clean_mask & ~pseudo_mask
+            gt = self._is_noise_gt
+            tp = (detected & gt).sum()
+            precision = tp / detected.sum() if detected.sum() > 0 else 0.0
+            recall = tp / gt.sum() if gt.sum() > 0 else 0.0
+            print(f"  [辨别器] Precision={precision:.4f}, Recall={recall:.4f}")

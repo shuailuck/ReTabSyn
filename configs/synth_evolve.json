@@ -2,13 +2,15 @@
     "synthesizer": "evolve",
     "synth_kwargs": {
         "p": 0.05,
-        "T": 10,
+        "T": 20,
         "tau": 0.5,
         "delta": 0.3,
         "K": 5,
         "epsilon": 0.05,
         "latent_dim": 8,
         "hidden_dim": 64,
-        "boundary_ratio": 1.0
+        "boundary_ratio": 1.0,
+        "aum_lr": 1e-4,
+        "aum_batch_size": 256
     }
 }

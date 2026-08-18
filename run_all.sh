@@ -7,27 +7,28 @@
 
 set -e
 
-CSV="csv/example/wilt.csv"
+CSV="csv/example/adult_dataset.csv"
 TARGET="class"
-N_SEEDS=10
+N_SEEDS=1
 BASE_SEED=42
 RESULTS_DIR="results"
-SCENARIO_DIR="scenario_data"
-SYNTH_DIR="synth_data"
+SCENARIO_DIR="csv/scenario_data"
+SYNTH_DIR="csv/synth_data"
 
 SYNTH_ALGOS=(
-    "smote"
-    "tvae"
+    # "smote"
+    # "tvae"
     # "great"
     # "retabsyn"
     # "pta"
     # "cart"
     # "cartgenir"
+    "evolve"
 )
 
 SMALL_NS=(32 64 128 256)
 IMBALANCED_PREVS=(0.01 0.05 0.10)
-NOISY_RATIOS=(0.1 0.2 0.3 0.4)
+NOISY_RATIOS=(0.3)
 
 mkdir -p "$RESULTS_DIR" "$SCENARIO_DIR" "$SYNTH_DIR"
 
@@ -39,42 +40,42 @@ echo "  Algorithms: ${SYNTH_ALGOS[*]}"
 echo "=========================================="
 
 # ── Small Data 场景 ────────────────────────────────────
-echo ""
-echo "========== Small Data =========="
-for N in "${SMALL_NS[@]}"; do
-    LABEL="n${N}"
-    for ALGO in "${SYNTH_ALGOS[@]}"; do
-        echo ""
-        echo ">>> small/$LABEL | $ALGO"
-        python pipeline.py \
-            --csv "$CSV" --scenario small --scenario-label "$LABEL" \
-            --scenario-kwargs "{\"n_samples\": $N}" \
-            --target "$TARGET" --synthesizer "$ALGO" \
-            --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
-            --scenario-output-dir "$SCENARIO_DIR" \
-            --synth-output-dir "$SYNTH_DIR" \
-            --output "$RESULTS_DIR/small_${ALGO}_${LABEL}.csv"
-    done
-done
+# echo ""
+# echo "========== Small Data =========="
+# for N in "${SMALL_NS[@]}"; do
+#     LABEL="n${N}"
+#     for ALGO in "${SYNTH_ALGOS[@]}"; do
+#         echo ""
+#         echo ">>> small/$LABEL | $ALGO"
+#         python pipeline.py \
+#             --csv "$CSV" --scenario small --scenario-label "$LABEL" \
+#             --scenario-kwargs "{\"n_samples\": $N}" \
+#             --target "$TARGET" --synthesizer "$ALGO" \
+#             --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
+#             --scenario-output-dir "$SCENARIO_DIR" \
+#             --synth-output-dir "$SYNTH_DIR" \
+#             --output "$RESULTS_DIR/small_${ALGO}_${LABEL}.csv"
+#     done
+# done
 
 # ── Imbalanced 场景 ─────────────────────────────────────
-echo ""
-echo "========== Imbalanced =========="
-for PREV in "${IMBALANCED_PREVS[@]}"; do
-    LABEL="prev$(echo "$PREV" | sed 's/0\.//')"
-    for ALGO in "${SYNTH_ALGOS[@]}"; do
-        echo ""
-        echo ">>> imbalanced/$LABEL | $ALGO"
-        python pipeline.py \
-            --csv "$CSV" --scenario imbalanced --scenario-label "$LABEL" \
-            --scenario-kwargs "{\"minority_prev\": $PREV}" \
-            --target "$TARGET" --synthesizer "$ALGO" \
-            --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
-            --scenario-output-dir "$SCENARIO_DIR" \
-            --synth-output-dir "$SYNTH_DIR" \
-            --output "$RESULTS_DIR/imbalanced_${ALGO}_${LABEL}.csv"
-    done
-done
+# echo ""
+# echo "========== Imbalanced =========="
+# for PREV in "${IMBALANCED_PREVS[@]}"; do
+#     LABEL="prev$(echo "$PREV" | sed 's/0\.//')"
+#     for ALGO in "${SYNTH_ALGOS[@]}"; do
+#         echo ""
+#         echo ">>> imbalanced/$LABEL | $ALGO"
+#         python pipeline.py \
+#             --csv "$CSV" --scenario imbalanced --scenario-label "$LABEL" \
+#             --scenario-kwargs "{\"minority_prev\": $PREV}" \
+#             --target "$TARGET" --synthesizer "$ALGO" \
+#             --n-seeds "$N_SEEDS" --base-seed "$BASE_SEED" \
+#             --scenario-output-dir "$SCENARIO_DIR" \
+#             --synth-output-dir "$SYNTH_DIR" \
+#             --output "$RESULTS_DIR/imbalanced_${ALGO}_${LABEL}.csv"
+#     done
+# done
 
 # ── Noisy Label 场景 ────────────────────────────────────
 echo ""
