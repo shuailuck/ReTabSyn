@@ -136,6 +136,9 @@ class BaseScenario(ABC):
     def _clean_path(self) -> str:
         return os.path.join(self.save_config.scenario_output_dir, f"clean_train_{self.save_config.scenario_label}_seed{self.seed}.csv")
 
+    def _noise_mask_path(self) -> str:
+        return os.path.join(self.save_config.scenario_output_dir, f"noise_mask_{self.save_config.scenario_label}_seed{self.seed}.npy")
+
     def _synth_path(self) -> str:
         return os.path.join(self.save_config.synth_output_dir, f"{self.save_config.scenario_name}_{self.save_config.synthesizer_name}_{self.save_config.scenario_label}_seed{self.seed}.csv")
 
@@ -155,12 +158,17 @@ class BaseScenario(ABC):
             clean_train = getattr(self, "clean_train", None)
             if clean_train is not None:
                 clean_train.to_csv(self._clean_path(), index=False)
+            noise_mask = getattr(self, "noise_mask", None)
+            if noise_mask is not None:
+                np.save(self._noise_mask_path(), noise_mask)
 
     def _load_scenario_data(self) -> None:
         self.train_df = pd.read_csv(self._train_path())
         self.test_df = pd.read_csv(self._test_path())
         if os.path.exists(self._clean_path()):
             self.clean_train = pd.read_csv(self._clean_path())
+        if os.path.exists(self._noise_mask_path()):
+            self.noise_mask = np.load(self._noise_mask_path())
 
     def _save_synth_data(self) -> None:
         if self.save_config.synth_output_dir and self.save_config.synthesizer_name:

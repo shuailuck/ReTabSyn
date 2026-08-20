@@ -68,6 +68,8 @@ class TVAESynthesizer(BaseTabularSynthesizer):
         for col in df.columns:
             if df[col].dtype == object or df[col].dtype.name == "category":
                 discrete_cols.append(col)
+            elif df[col].nunique() <= 20:  # 低基数整数列（如 education-num）视为离散
+                discrete_cols.append(col)
 
         self._model = TVAE(
             embedding_dim=self.embedding_dim,

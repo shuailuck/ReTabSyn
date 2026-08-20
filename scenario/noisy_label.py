@@ -19,6 +19,7 @@ class NoisyLabelScenario(BaseScenario):
         self.target_col = target_col
         self.noise_ratio = noise_ratio
         self.clean_train: pd.DataFrame | None = None
+        self.noise_mask: np.ndarray | None = None
 
     def _build(self, df: pd.DataFrame, full_test: pd.DataFrame | None = None,
                **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -56,13 +57,13 @@ class NoisyLabelScenario(BaseScenario):
         return results
 
     def _flip_labels(self, df: pd.DataFrame) -> pd.DataFrame:
-        """按 noise_ratio 概率翻转训练集标签，并标记 is_noise 列。
+        """按 noise_ratio 概率翻转训练集标签。
 
-        is_noise: 1=标签被翻转（噪声），0=标签未翻转（干净）。
+        不向 df 添加列，而是将噪声索引维护到 self.noise_mask。
         """
         y = df[self.target_col]
         classes = np.unique(y)
-        is_noise = np.zeros(len(df), dtype=int)
+        noise_mask = np.zeros(len(df), dtype=bool)
 
         if len(classes) >= 2:
             rng = np.random.RandomState(self.seed)
@@ -74,9 +75,9 @@ class NoisyLabelScenario(BaseScenario):
                 other_classes = [c for c in classes if c != current]
                 new_label = rng.choice(other_classes)
                 df.loc[idx, self.target_col] = new_label
-                is_noise[idx] = 1
+                noise_mask[idx] = True
 
-        df["is_noise"] = is_noise
+        self.noise_mask = noise_mask
         return df
 
 
@@ -104,7 +105,7 @@ class EvolveNoisyLabelScenario(NoisyLabelScenario):
         from evolve.algorithm import Evolve
         evolve_kwargs = synthesizer_kwargs or {}
         algo = Evolve(random_state=self.seed, **evolve_kwargs)
-        clean_df, boundary_df = algo.run(self.train_df, self.target_col)
+        clean_df, boundary_df = algo.run(self.train_df, self.target_col, noise_mask=self.noise_mask)
 
         self.synth_df = pd.concat([clean_df, boundary_df], ignore_index=True)
         self._save_synth_data()

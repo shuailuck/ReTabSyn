@@ -14,6 +14,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 
@@ -116,8 +117,15 @@ class Evolve:
     # 主入口
     # -------------------------------------------------------------------
 
-    def run(self, df: pd.DataFrame, target_col: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def run(self, df: pd.DataFrame, target_col: str,
+            noise_mask: np.ndarray | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
         """运行完整 Evolve 闭环。
+
+        Parameters
+        ----------
+        df : 含噪训练数据（不含元数据列）
+        target_col : 目标列名
+        noise_mask : 噪声 ground truth（可选，用于报告辨别器精度）
 
         Returns
         -------
@@ -127,7 +135,8 @@ class Evolve:
         np.random.seed(self.random_state)
 
         self._target_col = target_col
-        self._columns = [c for c in df.columns if c != "is_noise"]
+        self._columns = list(df.columns)
+        self._noise_gt = noise_mask
 
         # 预处理
         X, y = self._preprocess(df)
@@ -179,7 +188,7 @@ class Evolve:
         boundary_df = self._generate_boundary_df(n_boundary)
 
         # 干净集
-        clean_df = df[clean_mask].drop(columns=["is_noise"], errors="ignore").reset_index(drop=True)
+        clean_df = df[clean_mask].reset_index(drop=True)
 
         return clean_df, boundary_df
 
@@ -188,11 +197,7 @@ class Evolve:
     # -------------------------------------------------------------------
 
     def _preprocess(self, df: pd.DataFrame):
-        self._is_noise_gt = None
-        if "is_noise" in df.columns:
-            self._is_noise_gt = df["is_noise"].values.astype(bool)
-
-        feat_cols = [c for c in df.columns if c != self._target_col and c != "is_noise"]
+        feat_cols = [c for c in df.columns if c != self._target_col]
         X = df[feat_cols].copy()
         y = df[self._target_col]
 
@@ -253,29 +258,32 @@ class Evolve:
         model = MLPClassifier(X.shape[1], self._num_classes + 1, self.hidden_dim).to(self.device)
         optimizer = torch.optim.Adam(model.parameters(), lr=self.aum_lr)
 
-        X_tensor = torch.tensor(X, dtype=torch.float32).to(self.device)
-        y_tensor = torch.tensor(y, dtype=torch.long).to(self.device)
-        active_tensor = torch.tensor(active_mask, dtype=torch.bool).to(self.device)
+        X_tensor = torch.tensor(X, dtype=torch.float32)
+        y_tensor = torch.tensor(y, dtype=torch.long)
+        active_tensor = torch.tensor(active_mask, dtype=torch.bool)
+
+        dataset = TensorDataset(X_tensor, y_tensor, active_tensor)
+        dataloader = DataLoader(dataset, batch_size=self.aum_batch_size, shuffle=True)
 
         margins = np.zeros(len(X))
         logits_np = None
         for _ in range(self.T):
             model.train()
-            # mini-batch 训练
-            perm = torch.randperm(len(X))
-            for i in range(0, len(X), self.aum_batch_size):
-                idx = perm[i:i + self.aum_batch_size]
-                batch_active = active_tensor[idx]
+            for X_batch, y_batch, active_batch in dataloader:
+                X_batch = X_batch.to(self.device)
+                y_batch = y_batch.to(self.device)
+                active_batch = active_batch.to(self.device)
+
                 optimizer.zero_grad()
-                logits = model(X_tensor[idx])
-                loss = F.cross_entropy(logits[batch_active], y_tensor[idx][batch_active])
+                logits = model(X_batch)
+                loss = F.cross_entropy(logits[active_batch], y_batch[active_batch])
                 loss.backward()
                 optimizer.step()
 
             # 记录 margin
             with torch.no_grad():
                 model.eval()
-                logits_np = model(X_tensor).cpu().numpy()
+                logits_np = model(X_tensor.to(self.device)).cpu().numpy()
                 margins += self._compute_margin(logits_np, y) / self.T
 
         return margins, logits_np
@@ -406,9 +414,9 @@ class Evolve:
         n_noisy = (~clean_mask & ~pseudo_mask).sum()
         print(f"[{tag} {round_idx + 1}/{total}] 阈值={threshold:.4f}, "
               f"干净={clean_mask.sum()}, 噪声={n_noisy}")
-        if self._is_noise_gt is not None:
+        if self._noise_gt is not None:
             detected = ~clean_mask & ~pseudo_mask
-            gt = self._is_noise_gt
+            gt = self._noise_gt
             tp = (detected & gt).sum()
             precision = tp / detected.sum() if detected.sum() > 0 else 0.0
             recall = tp / gt.sum() if gt.sum() > 0 else 0.0
